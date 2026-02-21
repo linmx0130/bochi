@@ -1,12 +1,14 @@
+mod adb_utils;
 mod selector;
+mod ui_element;
 
+use adb_utils::get_adb_command;
 use clap::Parser;
-use regex::Regex;
-use roxmltree::Document;
 use selector::Selector;
-use std::process::{exit, Command};
+use std::process::exit;
 use std::thread;
 use std::time::{Duration, Instant};
+use ui_element::{find_element, get_ui_hierarchy, UiElement};
 
 #[derive(Parser)]
 #[command(name = "bochi")]
@@ -25,99 +27,19 @@ struct Cli {
     timeout: u64,
 }
 
-#[derive(Debug)]
-struct UiElement {
-    bounds: (i32, i32, i32, i32),
-}
-
-fn get_adb_command(serial: Option<&str>) -> Command {
-    let mut cmd = Command::new("adb");
-    if let Some(s) = serial {
-        cmd.arg("-s").arg(s);
-    }
-    cmd
-}
-
-fn get_ui_hierarchy(serial: Option<&str>) -> Result<String, String> {
-    let output = get_adb_command(serial)
-        .args(["shell", "uiautomator", "dump", "/sdcard/window_dump.xml"])
-        .output()
-        .map_err(|e| format!("Failed to execute adb shell uiautomator dump: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "uiautomator dump failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
-    let output = get_adb_command(serial)
-        .args(["shell", "cat", "/sdcard/window_dump.xml"])
-        .output()
-        .map_err(|e| format!("Failed to read dump file: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "Failed to read dump file: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
-    String::from_utf8(output.stdout)
-        .map_err(|e| format!("Invalid UTF-8 in dump file: {}", e))
-}
-
-fn parse_bounds(bounds_str: &str) -> Option<(i32, i32, i32, i32)> {
-    // Using r##"..."## for regex pattern with backslashes
-    let pattern = r##"\[(\d+),(\d+)\]\[(\d+),(\d+)\]"##;
-    let re = Regex::new(pattern).unwrap();
-    if let Some(caps) = re.captures(bounds_str) {
-        let x1: i32 = caps.get(1)?.as_str().parse().ok()?;
-        let y1: i32 = caps.get(2)?.as_str().parse().ok()?;
-        let x2: i32 = caps.get(3)?.as_str().parse().ok()?;
-        let y2: i32 = caps.get(4)?.as_str().parse().ok()?;
-        Some((x1, y1, x2, y2))
-    } else {
-        None
-    }
-}
-
-fn find_element(xml: &str, selector: &Selector) -> Result<Option<UiElement>, String> {
-    let doc = Document::parse(xml).map_err(|e| format!("Failed to parse XML: {}", e))?;
-
-    for node in doc.descendants() {
-        if node.is_element() {
-            let attr_value = match selector.field.as_str() {
-                "text" => node.attribute("text"),
-                "contentDescription" | "content-description" => node.attribute("content-desc"),
-                "resourceId" | "resource-id" => node.attribute("resource-id"),
-                "class" => node.attribute("class"),
-                "package" => node.attribute("package"),
-                field => node.attribute(field),
-            };
-
-            if let Some(value) = attr_value {
-                if value == selector.value {
-                    if let Some(bounds_str) = node.attribute("bounds") {
-                        if let Some(bounds) = parse_bounds(bounds_str) {
-                            return Ok(Some(UiElement { bounds }));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(None)
-}
-
 fn tap_element(serial: Option<&str>, element: &UiElement) -> Result<(), String> {
     let (x1, y1, x2, y2) = element.bounds;
     let center_x = (x1 + x2) / 2;
     let center_y = (y1 + y2) / 2;
 
     let output = get_adb_command(serial)
-        .args(["shell", "input", "tap", &center_x.to_string(), &center_y.to_string()])
+        .args([
+            "shell",
+            "input",
+            "tap",
+            &center_x.to_string(),
+            &center_y.to_string(),
+        ])
         .output()
         .map_err(|e| format!("Failed to execute tap command: {}", e))?;
 
@@ -168,12 +90,10 @@ fn main() {
 
     let result = match cli.command.as_str() {
         "waitFor" => wait_for_element(cli.serial.as_deref(), &selector, cli.timeout).map(|_| ()),
-        "tap" => {
-            match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
-                Ok(element) => tap_element(cli.serial.as_deref(), &element),
-                Err(e) => Err(e),
-            }
-        }
+        "tap" => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
+            Ok(element) => tap_element(cli.serial.as_deref(), &element),
+            Err(e) => Err(e),
+        },
         _ => Err(format!(
             "Unknown command: {}. Supported: waitFor, tap",
             cli.command
