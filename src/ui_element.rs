@@ -6,6 +6,7 @@ use roxmltree::Document;
 #[derive(Debug)]
 pub struct UiElement {
     pub bounds: (i32, i32, i32, i32),
+    pub raw_xml: String,
 }
 
 pub fn get_ui_hierarchy(serial: Option<&str>) -> Result<String, String> {
@@ -51,6 +52,37 @@ pub fn parse_bounds(bounds_str: &str) -> Option<(i32, i32, i32, i32)> {
     }
 }
 
+fn node_to_xml_string(node: roxmltree::Node) -> String {
+    if !node.is_element() {
+        return String::new();
+    }
+
+    let tag_name = node.tag_name().name();
+    
+    // Build attributes string
+    let mut attrs = String::new();
+    for attr in node.attributes() {
+        let name = attr.name();
+        let value = attr.value();
+        // Escape special characters in attribute values
+        let escaped = value
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;");
+        attrs.push_str(&format!(r##" {}="{}""##, name, escaped));
+    }
+
+    // Check if node has children
+    let has_children = node.children().any(|child| child.is_element());
+    
+    if has_children {
+        format!("<{}{}>", tag_name, attrs)
+    } else {
+        format!("<{}{} />", tag_name, attrs)
+    }
+}
+
 pub fn find_element(xml: &str, selector: &Selector) -> Result<Option<UiElement>, String> {
     let doc = Document::parse(xml).map_err(|e| format!("Failed to parse XML: {}", e))?;
 
@@ -69,7 +101,8 @@ pub fn find_element(xml: &str, selector: &Selector) -> Result<Option<UiElement>,
                 if value == selector.value {
                     if let Some(bounds_str) = node.attribute("bounds") {
                         if let Some(bounds) = parse_bounds(bounds_str) {
-                            return Ok(Some(UiElement { bounds }));
+                            let raw_xml = node_to_xml_string(node);
+                            return Ok(Some(UiElement { bounds, raw_xml }));
                         }
                     }
                 }

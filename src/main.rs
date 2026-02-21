@@ -89,7 +89,9 @@ fn main() {
     };
 
     let result = match cli.command.as_str() {
-        "waitFor" => wait_for_element(cli.serial.as_deref(), &selector, cli.timeout).map(|_| ()),
+        "waitFor" => wait_for_element(cli.serial.as_deref(), &selector, cli.timeout).map(|element| {
+            println!("{}", element.raw_xml);
+        }),
         "tap" => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
             Ok(element) => tap_element(cli.serial.as_deref(), &element),
             Err(e) => Err(e),
