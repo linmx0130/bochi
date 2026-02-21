@@ -2,7 +2,7 @@ mod adb_utils;
 mod selector;
 mod ui_element;
 
-use adb_utils::get_adb_command;
+use adb_utils::{format_adb_error, get_adb_command};
 use clap::Parser;
 use selector::Selector;
 use std::process::exit;
@@ -33,6 +33,7 @@ fn tap_element(serial: Option<&str>, element: &UiElement) -> Result<(), String> 
     let center_y = (y1 + y2) / 2;
 
     let output = get_adb_command(serial)
+        .map_err(|e| format_adb_error(&e))?
         .args([
             "shell",
             "input",
@@ -41,7 +42,7 @@ fn tap_element(serial: Option<&str>, element: &UiElement) -> Result<(), String> 
             &center_y.to_string(),
         ])
         .output()
-        .map_err(|e| format!("Failed to execute tap command: {}", e))?;
+        .map_err(|e| format_adb_error(&e))?;
 
     if !output.status.success() {
         return Err(format!(

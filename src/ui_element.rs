@@ -1,4 +1,4 @@
-use crate::adb_utils::get_adb_command;
+use crate::adb_utils::{format_adb_error, get_adb_command};
 use crate::selector::Selector;
 use regex::Regex;
 use roxmltree::Document;
@@ -11,9 +11,10 @@ pub struct UiElement {
 
 pub fn get_ui_hierarchy(serial: Option<&str>) -> Result<String, String> {
     let output = get_adb_command(serial)
+        .map_err(|e| format_adb_error(&e))?
         .args(["shell", "uiautomator", "dump", "/sdcard/window_dump.xml"])
         .output()
-        .map_err(|e| format!("Failed to execute adb shell uiautomator dump: {}", e))?;
+        .map_err(|e| format_adb_error(&e))?;
 
     if !output.status.success() {
         return Err(format!(
@@ -23,9 +24,10 @@ pub fn get_ui_hierarchy(serial: Option<&str>) -> Result<String, String> {
     }
 
     let output = get_adb_command(serial)
+        .map_err(|e| format_adb_error(&e))?
         .args(["shell", "cat", "/sdcard/window_dump.xml"])
         .output()
-        .map_err(|e| format!("Failed to read dump file: {}", e))?;
+        .map_err(|e| format_adb_error(&e))?;
 
     if !output.status.success() {
         return Err(format!(
