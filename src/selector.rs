@@ -28,6 +28,24 @@ impl Selector {
             ))
         }
     }
+
+    /// Check if the given XML node matches this selector
+    pub fn matches(&self, node: roxmltree::Node) -> bool {
+        if !node.is_element() {
+            return false;
+        }
+
+        let attr_value = match self.field.as_str() {
+            "text" => node.attribute("text"),
+            "contentDescription" | "content-description" => node.attribute("content-desc"),
+            "resourceId" | "resource-id" => node.attribute("resource-id"),
+            "class" => node.attribute("class"),
+            "package" => node.attribute("package"),
+            field => node.attribute(field),
+        };
+
+        attr_value == Some(self.value.as_str())
+    }
 }
 
 #[cfg(test)]

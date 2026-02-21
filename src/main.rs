@@ -8,7 +8,7 @@ use selector::Selector;
 use std::process::exit;
 use std::thread;
 use std::time::{Duration, Instant};
-use ui_element::{find_element, get_ui_hierarchy, UiElement};
+use ui_element::{find_elements, get_ui_hierarchy, UiElement};
 
 #[derive(Parser)]
 #[command(name = "bochi")]
@@ -59,6 +59,15 @@ fn wait_for_element(
     selector: &Selector,
     timeout_secs: u64,
 ) -> Result<UiElement, String> {
+    wait_for_elements(serial, selector, timeout_secs)
+        .map(|elements| elements.into_iter().next().unwrap())
+}
+
+fn wait_for_elements(
+    serial: Option<&str>,
+    selector: &Selector,
+    timeout_secs: u64,
+) -> Result<Vec<UiElement>, String> {
     let start = Instant::now();
     let timeout = Duration::from_secs(timeout_secs);
 
@@ -71,10 +80,11 @@ fn wait_for_element(
         }
 
         let xml = get_ui_hierarchy(serial)?;
-        match find_element(&xml, selector)? {
-            Some(element) => return Ok(element),
-            None => thread::sleep(Duration::from_millis(500)),
+        let elements = find_elements(&xml, selector)?;
+        if !elements.is_empty() {
+            return Ok(elements);
         }
+        thread::sleep(Duration::from_millis(500));
     }
 }
 
@@ -90,8 +100,10 @@ fn main() {
     };
 
     let result = match cli.command.as_str() {
-        "waitFor" => wait_for_element(cli.serial.as_deref(), &selector, cli.timeout).map(|element| {
-            println!("{}", element.raw_xml);
+        "waitFor" => wait_for_elements(cli.serial.as_deref(), &selector, cli.timeout).map(|elements| {
+            for element in elements {
+                println!("{}", element.raw_xml);
+            }
         }),
         "tap" => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
             Ok(element) => tap_element(cli.serial.as_deref(), &element),

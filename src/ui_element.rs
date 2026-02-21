@@ -85,34 +85,22 @@ fn node_to_xml_string(node: roxmltree::Node) -> String {
     }
 }
 
-pub fn find_element(xml: &str, selector: &Selector) -> Result<Option<UiElement>, String> {
+pub fn find_elements(xml: &str, selector: &Selector) -> Result<Vec<UiElement>, String> {
     let doc = Document::parse(xml).map_err(|e| format!("Failed to parse XML: {}", e))?;
+    let mut elements = Vec::new();
 
     for node in doc.descendants() {
-        if node.is_element() {
-            let attr_value = match selector.field.as_str() {
-                "text" => node.attribute("text"),
-                "contentDescription" | "content-description" => node.attribute("content-desc"),
-                "resourceId" | "resource-id" => node.attribute("resource-id"),
-                "class" => node.attribute("class"),
-                "package" => node.attribute("package"),
-                field => node.attribute(field),
-            };
-
-            if let Some(value) = attr_value {
-                if value == selector.value {
-                    if let Some(bounds_str) = node.attribute("bounds") {
-                        if let Some(bounds) = parse_bounds(bounds_str) {
-                            let raw_xml = node_to_xml_string(node);
-                            return Ok(Some(UiElement { bounds, raw_xml }));
-                        }
-                    }
+        if selector.matches(node) {
+            if let Some(bounds_str) = node.attribute("bounds") {
+                if let Some(bounds) = parse_bounds(bounds_str) {
+                    let raw_xml = node_to_xml_string(node);
+                    elements.push(UiElement { bounds, raw_xml });
                 }
             }
         }
     }
 
-    Ok(None)
+    Ok(elements)
 }
 
 #[cfg(test)]
