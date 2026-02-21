@@ -1,7 +1,10 @@
+mod selector;
+
 use clap::Parser;
 use regex::Regex;
 use roxmltree::Document;
-use std::process::{Command, exit};
+use selector::Selector;
+use std::process::{exit, Command};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -20,32 +23,6 @@ struct Cli {
 
     #[arg(short, long, default_value = "30")]
     timeout: u64,
-}
-
-#[derive(Debug)]
-struct Selector {
-    field: String,
-    value: String,
-}
-
-impl Selector {
-    fn parse(s: &str) -> Result<Selector, String> {
-        // Using r##"..."## to avoid issues with escaped quotes in raw strings
-        let pattern = r##"^(\w+)=["']?(.+?)["']?$"##;
-        let re = Regex::new(pattern).unwrap();
-        if let Some(caps) = re.captures(s) {
-            let field = caps.get(1).unwrap().as_str().to_string();
-            let mut value = caps.get(2).unwrap().as_str().to_string();
-            // Remove surrounding quotes if present
-            if (value.starts_with('"') && value.ends_with('"')) 
-                || (value.starts_with('\'') && value.ends_with('\'')) {
-                value = value[1..value.len()-1].to_string();
-            }
-            Ok(Selector { field, value })
-        } else {
-            Err(format!("Invalid selector format: {}. Expected: FIELD_NAME=VALUE", s))
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -106,8 +83,7 @@ fn parse_bounds(bounds_str: &str) -> Option<(i32, i32, i32, i32)> {
 }
 
 fn find_element(xml: &str, selector: &Selector) -> Result<Option<UiElement>, String> {
-    let doc = Document::parse(xml)
-        .map_err(|e| format!("Failed to parse XML: {}", e))?;
+    let doc = Document::parse(xml).map_err(|e| format!("Failed to parse XML: {}", e))?;
 
     for node in doc.descendants() {
         if node.is_element() {
@@ -191,17 +167,17 @@ fn main() {
     };
 
     let result = match cli.command.as_str() {
-        "waitFor" => {
-            wait_for_element(cli.serial.as_deref(), &selector, cli.timeout)
-                .map(|_| ())
-        }
+        "waitFor" => wait_for_element(cli.serial.as_deref(), &selector, cli.timeout).map(|_| ()),
         "tap" => {
             match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
                 Ok(element) => tap_element(cli.serial.as_deref(), &element),
                 Err(e) => Err(e),
             }
         }
-        _ => Err(format!("Unknown command: {}. Supported: waitFor, tap", cli.command)),
+        _ => Err(format!(
+            "Unknown command: {}. Supported: waitFor, tap",
+            cli.command
+        )),
     };
 
     match result {
