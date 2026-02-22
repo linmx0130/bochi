@@ -5,6 +5,7 @@
 /// - `[attr1="v1"][attr2="v2"]` - AND of multiple clauses
 /// - `sel1,sel2` - OR of multiple selectors
 /// - `:has(cond)` - select nodes with a descendant matching cond
+/// - `:not(cond)` - select nodes that do NOT match cond
 ///
 /// Examples:
 /// - `[text="Submit"]` - element with text="Submit"
@@ -12,6 +13,8 @@
 /// - `[text="Cancel"],[text="Back"]` - element with text="Cancel" OR text="Back"
 /// - `:has([text="Submit"])` - element that has a descendant with text="Submit"
 /// - `[class=List]:has([text="Item 1"])` - List element containing "Item 1"
+/// - `:not([clickable=false])` - element that is not clickable=false
+/// - `[text*=Confirm]:not([clickable=false])` - element with text containing "Confirm" AND not clickable=false
 #[derive(Debug, Clone, PartialEq)]
 pub enum Selector {
     /// AND of multiple attribute clauses
@@ -20,10 +23,13 @@ pub enum Selector {
     Or(Vec<Selector>),
     /// :has() pseudo-class - matches if node has a descendant matching the inner selector
     Has(Box<Selector>),
-    /// Combination of attribute clauses AND :has()
+    /// :not() pseudo-class - matches if node does NOT match the inner selector
+    Not(Box<Selector>),
+    /// Combination of attribute clauses AND :has() AND/OR :not()
     Complex {
         attrs: Vec<AttrClause>,
         has: Option<Box<Selector>>,
+        not: Option<Box<Selector>>,
     },
     /// Child combinator - matches if node matches child selector and its parent matches parent selector
     Child {
@@ -102,13 +108,18 @@ impl Selector {
             Selector::And(clauses) => clauses.iter().all(|c| c.matches(node)),
             Selector::Or(selectors) => selectors.iter().any(|s| s.matches(node)),
             Selector::Has(inner) => has_descendant_matching(node, inner),
-            Selector::Complex { attrs, has } => {
+            Selector::Not(inner) => !inner.matches(node),
+            Selector::Complex { attrs, has, not } => {
                 let attrs_match = attrs.iter().all(|c| c.matches(node));
                 let has_match = match has {
                     Some(inner) => has_descendant_matching(node, inner),
                     None => true,
                 };
-                attrs_match && has_match
+                let not_match = match not {
+                    Some(inner) => !inner.matches(node),
+                    None => true,
+                };
+                attrs_match && has_match && not_match
             }
             Selector::Child { parent, child } => {
                 // First check if current node matches child selector
@@ -256,13 +267,17 @@ impl<'a> SelectorParser<'a> {
         Ok(left)
     }
 
-    /// Parse a complex selector that may have :has() at the end
+    /// Parse a complex selector that may have :has() or :not() at the end
     fn parse_complex_selector(&mut self) -> Result<Selector, String> {
         self.skip_whitespace();
         
-        // Check if it starts with :has()
+        // Check if it starts with :has() or :not()
         if self.peek() == Some(':') {
-            return self.parse_has_selector();
+            if self.input[self.pos..].starts_with(":has(") {
+                return self.parse_has_selector();
+            } else if self.input[self.pos..].starts_with(":not(") {
+                return self.parse_not_selector();
+            }
         }
         
         // Parse attribute clauses
@@ -270,19 +285,50 @@ impl<'a> SelectorParser<'a> {
         
         self.skip_whitespace();
         
-        // Check for :has() after attribute clauses
-        if self.peek() == Some(':') && self.input[self.pos..].starts_with(":has(") {
-            let has_selector = self.parse_has_selector_suffix()?;
-            if clauses.is_empty() {
-                Ok(Selector::Has(has_selector))
-            } else {
+        // Check for :has() or :not() after attribute clauses
+        if self.peek() == Some(':') {
+            let mut has_selector: Option<Box<Selector>> = None;
+            let mut not_selector: Option<Box<Selector>> = None;
+            
+            // Parse any number of :has() and :not() suffixes
+            loop {
+                self.skip_whitespace();
+                if self.peek() != Some(':') {
+                    break;
+                }
+                
+                if self.input[self.pos..].starts_with(":has(") {
+                    if has_selector.is_some() {
+                        return Err("Multiple :has() pseudo-classes are not allowed".to_string());
+                    }
+                    has_selector = Some(self.parse_has_selector_suffix()?);
+                } else if self.input[self.pos..].starts_with(":not(") {
+                    if not_selector.is_some() {
+                        return Err("Multiple :not() pseudo-classes are not allowed".to_string());
+                    }
+                    not_selector = Some(self.parse_not_selector_suffix()?);
+                } else {
+                    break;
+                }
+            }
+            
+            if clauses.is_empty() && has_selector.is_none() && not_selector.is_none() {
+                return Err("Expected attribute clause, :has() or :not()".to_string());
+            }
+            
+            if has_selector.is_some() || not_selector.is_some() {
                 Ok(Selector::Complex {
                     attrs: clauses,
-                    has: Some(has_selector),
+                    has: has_selector,
+                    not: not_selector,
                 })
+            } else if clauses.is_empty() {
+                Err("Expected attribute clause".to_string())
+            } else {
+                Ok(Selector::And(clauses))
             }
         } else if clauses.is_empty() {
-            Err("Expected attribute clause or :has()".to_string())
+            Err("Expected attribute clause, :has() or :not()".to_string())
         } else {
             Ok(Selector::And(clauses))
         }
@@ -296,6 +342,14 @@ impl<'a> SelectorParser<'a> {
         Ok(Selector::Has(inner))
     }
 
+    /// Parse :not() selector (when it starts the expression)
+    fn parse_not_selector(&mut self) -> Result<Selector, String> {
+        self.expect_str(":not(")?;
+        let inner = self.parse_inner_selector()?;
+        self.expect_char(')')?;
+        Ok(Selector::Not(inner))
+    }
+
     /// Parse :has() as a suffix to an existing selector
     fn parse_has_selector_suffix(&mut self) -> Result<Box<Selector>, String> {
         self.expect_str(":has(")?;
@@ -303,6 +357,16 @@ impl<'a> SelectorParser<'a> {
         self.expect_char(')')?;
         // Return the inner selector directly, not wrapped in Has
         // The Complex variant already implies "has a descendant matching"
+        Ok(inner)
+    }
+
+    /// Parse :not() as a suffix to an existing selector
+    fn parse_not_selector_suffix(&mut self) -> Result<Box<Selector>, String> {
+        self.expect_str(":not(")?;
+        let inner = self.parse_inner_selector()?;
+        self.expect_char(')')?;
+        // Return the inner selector directly, not wrapped in Not
+        // The Complex variant handles the negation logic
         Ok(inner)
     }
 
@@ -611,9 +675,10 @@ mod tests {
     fn test_parse_complex_with_has() {
         let s = Selector::parse("[class=List]:has([text=Item])").unwrap();
         match s {
-            Selector::Complex { attrs, has } => {
+            Selector::Complex { attrs, has, not } => {
                 assert_eq!(attrs.len(), 1);
                 assert!(has.is_some());
+                assert!(not.is_none());
             }
             _ => panic!("Expected Complex selector"),
         }
@@ -1061,5 +1126,136 @@ mod tests {
 
         let selector = Selector::parse("[class=Column]:has([text=Submit])>[class=Button]").unwrap();
         assert!(selector.matches(button));
+    }
+
+    // Tests for :not() pseudo-class
+    #[test]
+    fn test_parse_not_selector() {
+        let s = Selector::parse(":not([clickable=false])").unwrap();
+        match s {
+            Selector::Not(inner) => {
+                // The inner selector should be [clickable=false]
+                match inner.as_ref() {
+                    Selector::And(clauses) => {
+                        assert_eq!(clauses.len(), 1);
+                        assert_eq!(clauses[0].attr, "clickable");
+                        assert_eq!(clauses[0].value, "false");
+                    }
+                    _ => panic!("Expected And selector inside :not()"),
+                }
+            }
+            _ => panic!("Expected Not selector"),
+        }
+    }
+
+    #[test]
+    fn test_parse_not_with_attrs() {
+        let s = Selector::parse("[text*=Confirm]:not([clickable=false])").unwrap();
+        match s {
+            Selector::Complex { attrs, has, not } => {
+                assert_eq!(attrs.len(), 1);
+                assert_eq!(attrs[0].attr, "text");
+                assert_eq!(attrs[0].op, AttrOp::Contains);
+                assert_eq!(attrs[0].value, "Confirm");
+                assert!(has.is_none());
+                assert!(not.is_some());
+            }
+            _ => panic!("Expected Complex selector"),
+        }
+    }
+
+    #[test]
+    fn test_matches_not() {
+        let xml = r##"<node text="Confirm" clickable="true" />"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        // Should match because clickable is not "false"
+        let selector = Selector::parse(":not([clickable=false])").unwrap();
+        assert!(selector.matches(node));
+
+        // Should not match because text is "Confirm"
+        let selector2 = Selector::parse(":not([text=Confirm])").unwrap();
+        assert!(!selector2.matches(node));
+
+        // Should match because text is not "Cancel"
+        let selector3 = Selector::parse(":not([text=Cancel])").unwrap();
+        assert!(selector3.matches(node));
+    }
+
+    #[test]
+    fn test_matches_not_with_attrs() {
+        let xml = r##"<node text="Confirm Button" clickable="true" />"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        // Should match because text contains "Confirm" AND clickable is not "false"
+        let selector = Selector::parse("[text*=Confirm]:not([clickable=false])").unwrap();
+        assert!(selector.matches(node));
+
+        // Should NOT match because although text contains "Confirm", clickable IS "true" (not "false" is true, so this should match)
+        // Actually clickable="true", so :not([clickable=false]) should match
+        // Let me fix the test - this should match
+        assert!(selector.matches(node));
+
+        // Test with a node that has clickable=false
+        let xml2 = r##"<node text="Confirm Button" clickable="false" />"##;
+        let doc2 = roxmltree::Document::parse(xml2).unwrap();
+        let node2 = doc2.root_element();
+
+        // Should NOT match because clickable is "false", and :not([clickable=false]) should reject it
+        assert!(!selector.matches(node2));
+    }
+
+    #[test]
+    fn test_not_with_has() {
+        let xml = r##"<node class="Container"><node class="Child" text="Other" /></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let container = doc.root_element();
+
+        // Should match because Container does NOT have a child with text="Submit"
+        let selector = Selector::parse("[class=Container]:not(:has([text=Submit]))").unwrap();
+        assert!(selector.matches(container));
+
+        // Should NOT match because Container does NOT have a child with text="Other" (it actually does!)
+        let selector2 = Selector::parse("[class=Container]:not(:has([text=Other]))").unwrap();
+        assert!(!selector2.matches(container));
+    }
+
+    #[test]
+    fn test_not_with_or() {
+        let xml = r##"<node text="OK" class="Button" />"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        // OR with :not() - matches if text=Cancel OR (text=OK AND not clickable=false)
+        let selector = Selector::parse("[text=Cancel],[text=OK]:not([clickable=false])").unwrap();
+        assert!(selector.matches(node));
+    }
+
+    #[test]
+    fn test_not_with_child_combinator() {
+        let xml = r##"<node class="Column"><node class="Button" clickable="true" /></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let column = doc.root_element();
+        let button = column.first_element_child().unwrap();
+
+        // Should match - button is a direct child of Column and is clickable (not false)
+        let selector = Selector::parse("[class=Column]>[clickable=true]:not([clickable=false])").unwrap();
+        assert!(selector.matches(button));
+    }
+
+    #[test]
+    fn test_combined_has_and_not() {
+        let xml = r##"<node class="List" id="list1"><node class="Item" text="Item 1" /></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let list = doc.root_element();
+
+        // Both :has() and :not() together
+        let selector = Selector::parse("[class=List]:has([text=\"Item 1\"]):not([id=list2])").unwrap();
+        assert!(selector.matches(list));
+
+        let selector2 = Selector::parse("[class=List]:has([text=\"Item 1\"]):not([id=list1])").unwrap();
+        assert!(!selector2.matches(list));
     }
 }

@@ -1,6 +1,6 @@
 ---
 name: operate-android-devices-with-bochi
-description: Bochi is a command line tool for AI agents to control Android devices via ADB. Use this skill when you need to interact with Android UI elements programmatically, such as tapping buttons, waiting for elements to appear, or automating Android device interactions. Supports CSS-like selectors with attribute assertions, AND/OR logic, and descendant matching.
+description: Bochi is a command line tool for AI agents to control Android devices via ADB. Use this skill when you need to interact with Android UI elements programmatically, such as tapping buttons, waiting for elements to appear, or automating Android device interactions. Supports CSS-like selectors with attribute assertions, AND/OR logic, descendant matching, and negation.
 license: MIT
 metadata:
   author: linmx0130
@@ -13,7 +13,7 @@ Bochi is a command line tool for AI agents to control Android devices via ADB. U
 ## Features
 
 - Uses `adb shell uiautomator dump` to obtain UI layout information
-- Supports CSS-like element selectors with attribute assertions, AND/OR logic, and descendant matching
+- Supports CSS-like element selectors with attribute assertions, AND/OR logic, descendant matching, and negation
 - Commands: `waitFor`, `tap`, `inputText`
 - Configurable timeout
 
@@ -112,6 +112,21 @@ bochi -e '[class=android.widget.ScrollView]:has([text="Item 1"])' -c tap
 
 # Match any element that has a descendant with text="Submit"
 bochi -e ':has([text=Submit])' -c tap
+```
+
+### Negation (`:not()`)
+
+Use `:not(cond)` to select nodes that do NOT match the condition:
+
+```bash
+# Match elements that are not clickable=false
+bochi -e ':not([clickable=false])' -c tap
+
+# Match elements with text containing "Confirm" but not clickable=false
+bochi -e '[text*=Confirm]:not([clickable=false])' -c tap
+
+# Match elements that do not have a descendant with text="Loading"
+bochi -e ':not(:has([text=Loading]))' -c waitFor
 ```
 
 ### Child Combinator (`>`)
