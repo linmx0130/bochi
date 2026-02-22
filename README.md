@@ -82,8 +82,8 @@ bochi -e '[class^=android.widget][text*=Save]' -c tap
 Multiple square bracket clauses connected together means AND:
 
 ```bash
-# Match element with class="Button" AND text="OK"
-bochi -e '[class=Button][text="OK"]' -c tap
+# Match element with class="android.widget.Button" AND text="OK"
+bochi -e '[class=android.widget.Button][text="OK"]' -c tap
 
 # Match element with package="com.example" AND clickable="true"
 bochi -e '[package=com.example][clickable=true]' -c tap
@@ -98,7 +98,7 @@ Use comma `,` to represent OR of multiple conditions:
 bochi -e '[text=Cancel],[text=Back]' -c tap
 
 # Match element with text="OK" OR text="Confirm"
-bochi -e '[class=Button][text=OK],[class=Button][text=Confirm]' -c tap
+bochi -e '[text=OK],[text=Confirm]' -c tap
 ```
 
 ### Descendant Matching (`:has()`)
@@ -106,8 +106,8 @@ bochi -e '[class=Button][text=OK],[class=Button][text=Confirm]' -c tap
 Use `:has(cond)` to select nodes which have a descendant matching the condition:
 
 ```bash
-# Match a List element that contains an item with text="Item 1"
-bochi -e '[class=List]:has([text="Item 1"])' -c tap
+# Match a ScrollView element that contains an item with text="Item 1"
+bochi -e '[class=android.widget.ScrollView]:has([text="Item 1"])' -c tap
 
 # Match any element that has a descendant with text="Submit"
 bochi -e ':has([text=Submit])' -c tap
@@ -118,11 +118,11 @@ bochi -e ':has([text=Submit])' -c tap
 Use `>` to select direct children:
 
 ```bash
-# Match clickable elements that are direct children of a Column
-bochi -e '[class=Column]>[clickable=true]' -c tap
+# Match clickable elements that are direct children of a ScrollView
+bochi -e '[class=android.widget.ScrollView]>[clickable=true]' -c tap
 
 # Chain child combinators
-bochi -e '[class=List]>[class=Item]>[text=Settings]' -c tap
+bochi -e '[class=android.widget.ScrollView]>[class*=Item]>[text=Settings]' -c tap
 ```
 
 Note: `>` only matches direct children, unlike `:has()` which matches any descendant.
@@ -132,11 +132,8 @@ Note: `>` only matches direct children, unlike `:has()` which matches any descen
 Combine all features for powerful selection:
 
 ```bash
-# Match a List with specific ID that contains a specific item
-bochi -e '[class=List][resource-id=list1]:has([text=Item 1])' -c tap
-
 # Match Button with text "OK" OR "Confirm"
-bochi -e '[class=Button][text=OK],[class=Button][text=Confirm]' -c tap
+bochi -e '[class=android.widget.Button][text=OK],[class=android.widgetButton][text=Confirm]' -c tap
 ```
 
 ### Supported Attributes
@@ -156,18 +153,6 @@ Values can be quoted or unquoted:
 - `[text=Submit]` - unquoted
 - `[text="Submit Button"]` - double quotes (required for values with spaces)
 - `[text='Submit']` - single quotes
-
-### Legacy Format (Backward Compatible)
-
-The old simple format is still supported:
-
-```bash
-# Legacy format (equivalent to [text=Submit])
-bochi -e 'text=Submit' -c tap
-
-# Legacy format with quotes
-bochi -e 'text="Submit Button"' -c tap
-```
 
 ## Examples
 
@@ -198,7 +183,7 @@ bochi -e '[text=OK],[text=Confirm]' -c tap
 ### Tap a list item within a specific container
 
 ```bash
-bochi -e '[class=RecyclerView]:has([text="Settings"])' -c tap
+bochi -e '[class$=RecyclerView]:has([text="Settings"])' -c tap
 ```
 
 ### Match text starting with a prefix
@@ -223,10 +208,10 @@ bochi -e '[text*=Save Changes]' -c tap
 
 ```bash
 # Select clickable buttons directly under a toolbar
-bochi -e '[class=Toolbar]>[clickable=true]' -c tap
+bochi -e '[class$=Toolbar]>[clickable=true]' -c tap
 
-# Chain: Select Settings item in a List
-bochi -e '[class=RecyclerView]>[class=LinearLayout]>[text=Settings]' -c tap
+# Chain: Select Settings item in a RecycleView
+bochi -e '[class$=RecyclerView]>[class$=LinearLayout]>[text=Settings]' -c tap
 ```
 
 ### Use with specific device
@@ -240,6 +225,25 @@ bochi -s emulator-5554 -e '[resource-id=com.example:id/button]' -c tap
 ```bash
 bochi -e '[text=Loading]' -c waitFor -t 60
 ```
+
+### Selecting a Button Within a Specific Container
+When you need to interact with a button that appears multiple times on the screen (e.g., "Reset" buttons for different layout configurations), you can combine the :has() pseudo-class with the child combinator (>) to precisely target the button within a specific container.
+
+```bash
+# Click the "Reset" button within the Portrait Layout section
+bochi -e ':has([text*=Portrait]) > [clickable=true]:has([text="Reset"])' -c tap
+```
+How it works:
+
+1. `:has([text*=Portrait])` - Selects a container element that contains a descendant with text matching "Portrait" (e.g., the "Portrait Layout" card)
+2. `>` - The child combinator restricts the search to direct children of the container
+3. `[clickable=true]:has([text="Reset"])` - Matches a clickable element that contains the text "Reset"
+
+This pattern is useful when:
+
+• Multiple similar buttons exist on the same screen (e.g., "Edit" or "Reset" buttons for different settings categories)
+• You need to distinguish between buttons based on their container context
+• Elements don't have unique resource IDs but their parent containers have distinguishing text
 
 ## Exit Codes
 
