@@ -143,6 +143,23 @@ bochi -e '[class=android.widget.ScrollView]>[class*=Item]>[text=Settings]' -c ta
 
 Note: `>` only matches direct children, unlike `:has()` which matches any descendant.
 
+### Descendant Combinator (space)
+
+Use a space to select any descendant (direct or indirect):
+
+```bash
+# Match buttons that are descendants of a ScrollView (any depth)
+bochi -e '[class=android.widget.ScrollView] [clickable=true]' -c tap
+
+# Match text anywhere within a specific container
+bochi -e '[resource-id=com.example:id/container] [text="Submit"]' -c tap
+
+# Chain descendant combinators
+bochi -e '[class=android.widget.ScrollView] [class=android.widget.LinearLayout] [text="Item 1"]' -c tap
+```
+
+Note: Unlike `>`, the space combinator matches elements at any depth, not just direct children.
+
 ### Complex Selectors
 
 Combine all features for powerful selection:
@@ -190,11 +207,15 @@ bochi -e '[class=android.widget.ScrollView]' -c waitFor --print-descendants
 bochi -e '[contentDescription="Open Menu"]' -c tap
 ```
 
+If there are multiple elements matches the selector, the first element will be tapped. In order to make accurate selection, use `contentDescription` or `resource-id` in the code to set accurate description.
+
 ### Input text into an element
 
 ```bash
 bochi -e '[resource-id=com.example:id/username]' -c inputText --text "myusername"
 ```
+
+If there are multiple elements matches the selector, the first element will receive the input. In order to make accurate selection, use `contentDescription` or `resource-id` in the code to set accurate description.
 
 ### Tap element with OR condition
 
@@ -276,3 +297,8 @@ This pattern is useful when:
 
 - Android Debug Bridge (ADB) installed and in PATH
 - Android device connected and authorized for debugging
+
+## Tips for using `bochi` during development
+1. In order to make accurate selection, `resource-id` should be the best attribute to query if it is available.
+2. In Jetpack Compose, `testTag` can be exposed as `resource-id` by applying `Modifier.semantics { testTagsAsResourceId = true }` on the containers.
+3. Select elements by adding accurate content description is also a good idea. Since content description will be used for accessibility tools, filling unique, concise and accurate content description to elements will benefit both automatic tools like `bochi` and more human users.

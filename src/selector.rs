@@ -2,10 +2,12 @@
 ///
 /// Syntax:
 /// - `[attr="value"]` or `[attr=value]` - attribute assertion
-/// - `[attr1="v1"][attr2="v2"]` - AND of multiple clauses
+/// - `[attr1="v1"][attr2="v2"]` - AND of multiple clauses (no space)
 /// - `sel1,sel2` - OR of multiple selectors
 /// - `:has(cond)` - select nodes with a descendant matching cond
 /// - `:not(cond)` - select nodes that do NOT match cond
+/// - `ancestor > child` - child combinator (direct children only)
+/// - `ancestor descendant` - descendant combinator (any depth)
 ///
 /// Examples:
 /// - `[text="Submit"]` - element with text="Submit"
@@ -15,6 +17,8 @@
 /// - `[class=List]:has([text="Item 1"])` - List element containing "Item 1"
 /// - `:not([clickable=false])` - element that is not clickable=false
 /// - `[text*=Confirm]:not([clickable=false])` - element with text containing "Confirm" AND not clickable=false
+/// - `[class=Column] > [clickable=true]` - clickable elements that are direct children of Column
+/// - `[class=List] [text=Item]` - elements with text="Item" anywhere inside a List
 #[derive(Debug, Clone, PartialEq)]
 pub enum Selector {
     /// AND of multiple attribute clauses
@@ -35,6 +39,11 @@ pub enum Selector {
     Child {
         parent: Box<Selector>,
         child: Box<Selector>,
+    },
+    /// Descendant combinator - matches if node matches descendant selector and has an ancestor matching ancestor selector
+    Descendant {
+        ancestor: Box<Selector>,
+        descendant: Box<Selector>,
     },
 }
 
@@ -136,6 +145,14 @@ impl Selector {
                     false
                 }
             }
+            Selector::Descendant { ancestor, descendant } => {
+                // First check if current node matches descendant selector
+                if !descendant.matches(node) {
+                    return false;
+                }
+                // Then check if any ancestor matches ancestor selector
+                has_ancestor_matching(node, ancestor)
+            }
         }
     }
 }
@@ -189,6 +206,18 @@ fn has_descendant_matching(node: roxmltree::Node, selector: &Selector) -> bool {
     false
 }
 
+/// Check if a node has any ancestor that matches the selector
+fn has_ancestor_matching(node: roxmltree::Node, selector: &Selector) -> bool {
+    if let Some(parent) = node.parent() {
+        if selector.matches(parent) {
+            return true;
+        }
+        has_ancestor_matching(parent, selector)
+    } else {
+        false
+    }
+}
+
 /// Parser for CSS-like selector syntax
 struct SelectorParser<'a> {
     input: &'a str,
@@ -219,7 +248,7 @@ impl<'a> SelectorParser<'a> {
             if self.is_eof() || self.peek() == Some(',') {
                 break;
             }
-            selectors.push(self.parse_child_combinator()?);
+            selectors.push(self.parse_descendant_chain()?);
             self.skip_whitespace();
             
             if self.peek() == Some(',') {
@@ -238,6 +267,53 @@ impl<'a> SelectorParser<'a> {
         } else {
             Ok(Selector::Or(selectors))
         }
+    }
+
+    /// Parse descendant chain (space-separated selectors)
+    /// Builds a left-associative tree: A B C becomes ((A B) C)
+    fn parse_descendant_chain(&mut self) -> Result<Selector, String> {
+        // First parse a child combinator chain
+        let mut left = self.parse_child_combinator()?;
+        
+        loop {
+            // Check if there's significant whitespace followed by another selector
+            // We need to differentiate between:
+            // - "[text=A] [text=B]" (descendant combinator)
+            // - "[text=A]" followed by end of input or ","
+            let saved_pos = self.pos;
+            self.skip_whitespace();
+            
+            // If we're at end of input, comma, or closing paren, stop
+            if self.is_eof() || self.peek() == Some(',') || self.peek() == Some(')') {
+                break;
+            }
+            
+            // Check if the next character can start a selector
+            // A selector can start with '[' (attribute), ':' (:has, :not), or '>' is handled by child combinator
+            match self.peek() {
+                Some('[') | Some(':') => {
+                    // This is a descendant combinator - parse the next selector
+                    let right = self.parse_child_combinator()?;
+                    left = Selector::Descendant {
+                        ancestor: Box::new(left),
+                        descendant: Box::new(right),
+                    };
+                }
+                Some('>') => {
+                    // '>' is handled by parse_child_combinator, not here
+                    // Restore position and let the child combinator parser handle it
+                    self.pos = saved_pos;
+                    break;
+                }
+                _ => {
+                    // Not a selector start, restore position and break
+                    self.pos = saved_pos;
+                    break;
+                }
+            }
+        }
+        
+        Ok(left)
     }
 
     /// Parse child combinator (parent > child)
@@ -402,14 +478,29 @@ impl<'a> SelectorParser<'a> {
     }
 
     /// Parse multiple attribute clauses [attr=value][attr2=value]
+    /// Stops if there's significant whitespace before the next `[` to allow for descendant combinator
     fn parse_attr_clauses(&mut self) -> Result<Vec<AttrClause>, String> {
         let mut clauses = vec![];
         
         loop {
+            // Check if next non-whitespace char is '['
+            let saved_pos = self.pos;
             self.skip_whitespace();
+            
             if self.peek() != Some('[') {
+                // Not an attribute clause, restore position and break
+                self.pos = saved_pos;
                 break;
             }
+            
+            // If we skipped whitespace (meaning there was whitespace before '['),
+            // and we already have at least one clause, treat this as a descendant combinator
+            // by restoring position and breaking
+            if self.pos > saved_pos && !clauses.is_empty() {
+                self.pos = saved_pos;
+                break;
+            }
+            
             clauses.push(self.parse_attr_clause()?);
         }
         
@@ -1257,5 +1348,185 @@ mod tests {
 
         let selector2 = Selector::parse("[class=List]:has([text=\"Item 1\"]):not([id=list1])").unwrap();
         assert!(!selector2.matches(list));
+    }
+
+    // Tests for descendant combinator (space-separated)
+    #[test]
+    fn test_parse_descendant_combinator() {
+        let s = Selector::parse("[class=Column] [clickable=true]").unwrap();
+        match s {
+            Selector::Descendant { ancestor, descendant } => {
+                // Ancestor should be And([class=Column])
+                match ancestor.as_ref() {
+                    Selector::And(clauses) => {
+                        assert_eq!(clauses.len(), 1);
+                        assert_eq!(clauses[0].attr, "class");
+                        assert_eq!(clauses[0].value, "Column");
+                    }
+                    _ => panic!("Expected And selector for ancestor"),
+                }
+                // Descendant should be And([clickable=true])
+                match descendant.as_ref() {
+                    Selector::And(clauses) => {
+                        assert_eq!(clauses.len(), 1);
+                        assert_eq!(clauses[0].attr, "clickable");
+                        assert_eq!(clauses[0].value, "true");
+                    }
+                    _ => panic!("Expected And selector for descendant"),
+                }
+            }
+            _ => panic!("Expected Descendant selector"),
+        }
+    }
+
+    #[test]
+    fn test_parse_descendant_combinator_multiple() {
+        // Chain: A B C
+        let s = Selector::parse("[class=A] [class=B] [class=C]").unwrap();
+        match s {
+            Selector::Descendant { ancestor, descendant } => {
+                // Should be ((A B) C)
+                match ancestor.as_ref() {
+                    Selector::Descendant { ancestor, descendant } => {
+                        assert!(matches!(ancestor.as_ref(), Selector::And(_)));
+                        assert!(matches!(descendant.as_ref(), Selector::And(_)));
+                    }
+                    _ => panic!("Expected nested Descendant"),
+                }
+                assert!(matches!(descendant.as_ref(), Selector::And(_)));
+            }
+            _ => panic!("Expected Descendant selector"),
+        }
+    }
+
+    #[test]
+    fn test_matches_descendant_combinator() {
+        // Grandchild should match - any descendant, not just direct child
+        let xml = r##"<node class="Column"><node class="Wrapper"><node class="Button" clickable="true" /></node></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let column = doc.root_element();
+        let wrapper = column.first_element_child().unwrap();
+        let button = wrapper.first_element_child().unwrap();
+
+        // The button is a descendant (grandchild) of Column, so it should match
+        let selector = Selector::parse("[class=Column] [clickable=true]").unwrap();
+        assert!(selector.matches(button));
+        
+        // The wrapper is also a descendant of Column
+        let selector2 = Selector::parse("[class=Column] [class=Wrapper]").unwrap();
+        assert!(selector2.matches(wrapper));
+        
+        // The column itself should not match (it's not a descendant)
+        assert!(!selector.matches(column));
+    }
+
+    #[test]
+    fn test_matches_descendant_combinator_direct_child() {
+        // Direct children should also match descendant combinator
+        let xml = r##"<node class="Column"><node class="Button" clickable="true" /></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let column = doc.root_element();
+        let button = column.first_element_child().unwrap();
+
+        let selector = Selector::parse("[class=Column] [clickable=true]").unwrap();
+        assert!(selector.matches(button));
+    }
+
+    #[test]
+    fn test_descendant_combinator_with_child() {
+        // Mix of descendant and child: A > B C (C is descendant of B which is child of A)
+        let xml = r##"<node class="A"><node class="B"><node class="C" text="Target" /></node></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let a = doc.root_element();
+        let b = a.first_element_child().unwrap();
+        let c = b.first_element_child().unwrap();
+
+        // A > B C should match C
+        let selector = Selector::parse("[class=A] > [class=B] [text=Target]").unwrap();
+        assert!(selector.matches(c));
+
+        // A B > C should also work
+        let selector2 = Selector::parse("[class=A] [class=B] > [class=C]").unwrap();
+        assert!(selector2.matches(c));
+    }
+
+    #[test]
+    fn test_descendant_combinator_with_or() {
+        let xml = r##"<node class="Column"><node class="Button" clickable="true" /></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let column = doc.root_element();
+        let button = column.first_element_child().unwrap();
+
+        // OR with descendant
+        let selector = Selector::parse("[class=Row] [clickable=true],[class=Column] [clickable=true]").unwrap();
+        assert!(selector.matches(button));
+    }
+
+    #[test]
+    fn test_descendant_combinator_with_has() {
+        let xml = r##"<node class="Container"><node class="Wrapper"><node class="Button" text="Submit" /></node></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let container = doc.root_element();
+        let wrapper = container.first_element_child().unwrap();
+        let button = wrapper.first_element_child().unwrap();
+
+        // Container that has a button, containing the wrapper that has that button
+        let selector = Selector::parse("[class=Container]:has([text=Submit]) [class=Wrapper]").unwrap();
+        assert!(selector.matches(wrapper));
+        
+        // Wrapper is a descendant of Container, and Button is a descendant of that
+        let selector2 = Selector::parse("[class=Container] [class=Wrapper] [text=Submit]").unwrap();
+        assert!(selector2.matches(button));
+    }
+
+    #[test]
+    fn test_descendant_vs_child_precedence() {
+        // Test that child combinator has higher precedence than descendant
+        // A > B C should be parsed as (A > B) C, not A > (B C)
+        let xml = r##"<node class="A"><node class="B"><node class="C" text="Target" /></node></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let a = doc.root_element();
+        let b = a.first_element_child().unwrap();
+        let c = b.first_element_child().unwrap();
+
+        // A > B C: C is descendant of B which is child of A
+        let selector = Selector::parse("[class=A] > [class=B] [text=Target]").unwrap();
+        assert!(selector.matches(c));
+
+        // A B > C: C is child of B which is descendant of A
+        let selector2 = Selector::parse("[class=A] [class=B] > [class=C]").unwrap();
+        assert!(selector2.matches(c));
+        assert!(selector2.matches(c));
+    }
+
+    #[test]
+    fn test_descendant_combinator_no_match() {
+        // Button outside of Column should not match
+        let xml = r##"<node class="Row"><node class="Button" clickable="true" /></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let row = doc.root_element();
+        let button = row.first_element_child().unwrap();
+
+        // Looking for button inside Column, but button is in Row
+        let selector = Selector::parse("[class=Column] [clickable=true]").unwrap();
+        assert!(!selector.matches(button));
+    }
+
+    #[test]
+    fn test_descendant_combinator_complex() {
+        // More complex example from README use case
+        let xml = r##"<node class="android.widget.ScrollView" resource-id="list"><node class="android.widget.LinearLayout"><node class="android.widget.TextView" text="Item 1" /></node></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let scrollview = doc.root_element();
+        let linear = scrollview.first_element_child().unwrap();
+        let textview = linear.first_element_child().unwrap();
+
+        // Find text view inside scrollview
+        let selector = Selector::parse("[class=android.widget.ScrollView] [text=\"Item 1\"]").unwrap();
+        assert!(selector.matches(textview));
+        
+        // Also should match the LinearLayout which is a direct child
+        let selector2 = Selector::parse("[class=android.widget.ScrollView] [class=android.widget.LinearLayout]").unwrap();
+        assert!(selector2.matches(linear));
     }
 }
