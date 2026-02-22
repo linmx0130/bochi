@@ -29,6 +29,10 @@ struct Cli {
     #[arg(short = 'c', long)]
     command: String,
 
+    /// Text content for inputText command
+    #[arg(long)]
+    text: Option<String>,
+
     #[arg(short, long, default_value = "30")]
     timeout: u64,
 }
@@ -53,6 +57,35 @@ fn tap_element(serial: Option<&str>, element: &UiElement) -> Result<(), String> 
     if !output.status.success() {
         return Err(format!(
             "Tap command failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(())
+}
+
+fn input_text_element(serial: Option<&str>, element: &UiElement, text: &str) -> Result<(), String> {
+    // First tap to focus on the element
+    tap_element(serial, element)?;
+    
+    // Small delay to ensure the element is focused
+    thread::sleep(Duration::from_millis(100));
+    
+    // Then type the text
+    let output = get_adb_command(serial)
+        .map_err(|e| format_adb_error(&e))?
+        .args([
+            "shell",
+            "input",
+            "text",
+            text,
+        ])
+        .output()
+        .map_err(|e| format_adb_error(&e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Input text command failed: {}",
             String::from_utf8_lossy(&output.stderr)
         ));
     }
@@ -115,8 +148,15 @@ fn main() {
             Ok(element) => tap_element(cli.serial.as_deref(), &element),
             Err(e) => Err(e),
         },
+        "inputText" => match cli.text {
+            Some(text) => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
+                Ok(element) => input_text_element(cli.serial.as_deref(), &element, &text),
+                Err(e) => Err(e),
+            },
+            None => Err("--text parameter is required for inputText command".to_string()),
+        },
         _ => Err(format!(
-            "Unknown command: {}. Supported: waitFor, tap",
+            "Unknown command: {}. Supported: waitFor, tap, inputText",
             cli.command
         )),
     };

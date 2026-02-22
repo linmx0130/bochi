@@ -14,7 +14,7 @@ Bochi is a command line tool for AI agents to control Android devices via ADB. U
 
 - Uses `adb shell uiautomator dump` to obtain UI layout information
 - Supports CSS-like element selectors with attribute assertions, AND/OR logic, and descendant matching
-- Commands: `waitFor`, `tap`
+- Commands: `waitFor`, `tap`, `inputText`
 - Configurable timeout
 
 ## Installation
@@ -33,7 +33,8 @@ bochi [OPTIONS] --selector <SELECTOR> --command <COMMAND>
 Options:
   -s, --serial <SERIAL>      Device serial number (optional if only one device)
   -e, --selector <SELECTOR>  Element selector (CSS-like syntax)
-  -c, --command <COMMAND>    Command to perform: waitFor, tap
+  -c, --command <COMMAND>    Command to perform: waitFor, tap, inputText
+      --text <TEXT>          Text content for inputText command
   -t, --timeout <TIMEOUT>    Timeout in seconds [default: 30]
   -h, --help                 Print help
 ```
@@ -180,6 +181,12 @@ bochi -e '[text=Submit]' -c waitFor
 
 ```bash
 bochi -e '[contentDescription="Open Menu"]' -c tap
+```
+
+### Input text into an element
+
+```bash
+bochi -e '[resource-id=com.example:id/username]' -c inputText --text "myusername"
 ```
 
 ### Tap element with OR condition
