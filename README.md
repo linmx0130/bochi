@@ -1,6 +1,14 @@
+---
+name: operate-android-devices-with-bochi
+description: Bochi is a command line tool for AI agents to control Android devices via ADB. Use this skill when you need to interact with Android UI elements programmatically, such as tapping buttons, waiting for elements to appear, or automating Android device interactions. Supports CSS-like selectors with attribute assertions, AND/OR logic, and descendant matching.
+license: MIT
+metadata:
+  author: linmx0130
+---
+
 # bochi
 
-A command line tool for AI agents to control Android devices via ADB.
+Bochi is a command line tool for AI agents to control Android devices via ADB. Use this skill when you need to interact with Android UI elements programmatically, such as tapping buttons, waiting for elements to appear, or automating Android device interactions. Supports CSS-like selectors with attribute assertions, AND/OR logic, and descendant matching.
 
 ## Features
 
