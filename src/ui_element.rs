@@ -85,6 +85,43 @@ fn node_to_xml_string(node: roxmltree::Node) -> String {
     }
 }
 
+/// Recursively convert a node and its descendants to XML string
+fn node_to_xml_string_with_descendants(node: roxmltree::Node) -> String {
+    if !node.is_element() {
+        return String::new();
+    }
+
+    let tag_name = node.tag_name().name();
+    
+    // Build attributes string
+    let mut attrs = String::new();
+    for attr in node.attributes() {
+        let name = attr.name();
+        let value = attr.value();
+        // Escape special characters in attribute values
+        let escaped = value
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;");
+        attrs.push_str(&format!(r##" {}="{}""##, name, escaped));
+    }
+
+    // Collect child elements recursively
+    let child_elements: Vec<String> = node.children()
+        .filter(|child| child.is_element())
+        .map(|child| node_to_xml_string_with_descendants(child))
+        .filter(|s| !s.is_empty())
+        .collect();
+    
+    if child_elements.is_empty() {
+        format!("<{}{} />", tag_name, attrs)
+    } else {
+        let children_xml = child_elements.join("");
+        format!("<{}{}>{}</{}>", tag_name, attrs, children_xml, tag_name)
+    }
+}
+
 pub fn find_elements(xml: &str, selector: &Selector) -> Result<Vec<UiElement>, String> {
     let doc = Document::parse(xml).map_err(|e| format!("Failed to parse XML: {}", e))?;
     let mut elements = Vec::new();
@@ -108,6 +145,38 @@ fn collect_matching_elements(node: Node, selector: &Selector, elements: &mut Vec
     for child in node.children() {
         collect_matching_elements(child, selector, elements);
     }
+}
+
+fn collect_matching_elements_with_descendants(
+    node: Node,
+    selector: &Selector,
+    elements: &mut Vec<UiElement>,
+) {
+    if node.is_element() && selector.matches(node) {
+        if let Some(bounds_str) = node.attribute("bounds") {
+            if let Some(bounds) = parse_bounds(bounds_str) {
+                let raw_xml = node_to_xml_string_with_descendants(node);
+                elements.push(UiElement { bounds, raw_xml });
+            }
+        }
+    }
+
+    // Recursively check children
+    for child in node.children() {
+        collect_matching_elements_with_descendants(child, selector, elements);
+    }
+}
+
+pub fn find_elements_with_descendants(
+    xml: &str,
+    selector: &Selector,
+) -> Result<Vec<UiElement>, String> {
+    let doc = Document::parse(xml).map_err(|e| format!("Failed to parse XML: {}", e))?;
+    let mut elements = Vec::new();
+
+    collect_matching_elements_with_descendants(doc.root(), selector, &mut elements);
+
+    Ok(elements)
 }
 
 #[cfg(test)]

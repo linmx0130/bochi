@@ -36,6 +36,7 @@ Options:
   -c, --command <COMMAND>    Command to perform: waitFor, tap, inputText
       --text <TEXT>          Text content for inputText command
   -t, --timeout <TIMEOUT>    Timeout in seconds [default: 30]
+      --print-descendants    Print the XML of matched elements including their descendants (for waitFor command)
   -h, --help                 Print help
 ```
 
@@ -160,6 +161,12 @@ Values can be quoted or unquoted:
 
 ```bash
 bochi -e '[text=Submit]' -c waitFor
+```
+
+### Wait for an element and print its descendants
+
+```bash
+bochi -e '[class=android.widget.ScrollView]' -c waitFor --print-descendants
 ```
 
 ### Tap an element
