@@ -1,7 +1,7 @@
 use crate::adb_utils::{format_adb_error, get_adb_command};
 use crate::selector::Selector;
 use regex::Regex;
-use roxmltree::Document;
+use roxmltree::{Document, Node};
 
 #[derive(Debug)]
 pub struct UiElement {
@@ -89,18 +89,25 @@ pub fn find_elements(xml: &str, selector: &Selector) -> Result<Vec<UiElement>, S
     let doc = Document::parse(xml).map_err(|e| format!("Failed to parse XML: {}", e))?;
     let mut elements = Vec::new();
 
-    for node in doc.descendants() {
-        if selector.matches(node) {
-            if let Some(bounds_str) = node.attribute("bounds") {
-                if let Some(bounds) = parse_bounds(bounds_str) {
-                    let raw_xml = node_to_xml_string(node);
-                    elements.push(UiElement { bounds, raw_xml });
-                }
+    collect_matching_elements(doc.root(), selector, &mut elements);
+
+    Ok(elements)
+}
+
+fn collect_matching_elements(node: Node, selector: &Selector, elements: &mut Vec<UiElement>) {
+    if node.is_element() && selector.matches(node) {
+        if let Some(bounds_str) = node.attribute("bounds") {
+            if let Some(bounds) = parse_bounds(bounds_str) {
+                let raw_xml = node_to_xml_string(node);
+                elements.push(UiElement { bounds, raw_xml });
             }
         }
     }
 
-    Ok(elements)
+    // Recursively check children
+    for child in node.children() {
+        collect_matching_elements(child, selector, elements);
+    }
 }
 
 #[cfg(test)]
