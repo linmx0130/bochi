@@ -19,6 +19,14 @@ Bochi is a command line tool for AI agents to control Android devices via ADB. U
 
 ## Installation
 
+### Install from crates.io
+
+```bash
+cargo install bochi
+```
+
+### Build from source
+
 ```bash
 cargo build --release
 ```
