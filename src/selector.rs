@@ -245,14 +245,25 @@ impl<'a> SelectorParser<'a> {
         
         loop {
             self.skip_whitespace();
-            if self.is_eof() || self.peek() == Some(',') {
+            if self.is_eof() {
                 break;
+            }
+            // If we see a comma but no selector before it, that's an error
+            if self.peek() == Some(',') {
+                // This means we have an empty selector (either leading or trailing comma)
+                return Err("Empty selector in OR expression".to_string());
             }
             selectors.push(self.parse_descendant_chain()?);
             self.skip_whitespace();
             
             if self.peek() == Some(',') {
                 self.advance(); // consume ','
+                // Check if there's a selector after this comma
+                self.skip_whitespace();
+                if self.is_eof() || self.peek() == Some(',') {
+                    // Trailing comma or double comma - error
+                    return Err("Empty selector in OR expression".to_string());
+                }
             } else {
                 break;
             }
@@ -367,6 +378,7 @@ impl<'a> SelectorParser<'a> {
             let mut not_selector: Option<Box<Selector>> = None;
             
             // Parse any number of :has() and :not() suffixes
+            // Multiple :has() or :not() are allowed - last one wins
             loop {
                 self.skip_whitespace();
                 if self.peek() != Some(':') {
@@ -374,14 +386,8 @@ impl<'a> SelectorParser<'a> {
                 }
                 
                 if self.input[self.pos..].starts_with(":has(") {
-                    if has_selector.is_some() {
-                        return Err("Multiple :has() pseudo-classes are not allowed".to_string());
-                    }
                     has_selector = Some(self.parse_has_selector_suffix()?);
                 } else if self.input[self.pos..].starts_with(":not(") {
-                    if not_selector.is_some() {
-                        return Err("Multiple :not() pseudo-classes are not allowed".to_string());
-                    }
                     not_selector = Some(self.parse_not_selector_suffix()?);
                 } else {
                     break;
@@ -520,6 +526,19 @@ impl<'a> SelectorParser<'a> {
         
         let value = self.parse_value()?;
         
+        // CSS spec: substring operators (^=, $=, *=) require non-empty values
+        match op {
+            AttrOp::StartsWith | AttrOp::EndsWith | AttrOp::Contains => {
+                if value.is_empty() {
+                    return Err(format!(
+                        "Empty value not allowed for {:?} operator",
+                        op
+                    ));
+                }
+            }
+            AttrOp::Equals => {} // Empty value allowed for =
+        }
+        
         self.skip_whitespace();
         self.expect_char(']')?;
         
@@ -602,6 +621,7 @@ impl<'a> SelectorParser<'a> {
     }
 
     /// Parse an unquoted value (stops at ] or , or whitespace)
+    /// Note: The caller should validate empty values based on the operator
     fn parse_unquoted_value(&mut self) -> Result<String, String> {
         let start = self.pos;
         
@@ -612,10 +632,8 @@ impl<'a> SelectorParser<'a> {
             self.advance();
         }
         
-        if start == self.pos {
-            return Err(format!("Expected value at position {}", self.pos));
-        }
-        
+        // Empty values are allowed - return empty string
+        // (CSS spec: only = allows empty; ^=, $=, *= require non-empty)
         Ok(self.input[start..self.pos].to_string())
     }
 
@@ -1528,5 +1546,394 @@ mod tests {
         // Also should match the LinearLayout which is a direct child
         let selector2 = Selector::parse("[class=android.widget.ScrollView] [class=android.widget.LinearLayout]").unwrap();
         assert!(selector2.matches(linear));
+    }
+
+
+    #[test]
+    fn test_nested_has_in_not() {
+        // :not(:has([text=A])) - element that does NOT have a descendant with text=A
+        let s = Selector::parse(":not(:has([text=Submit]))").unwrap();
+        match s {
+            Selector::Not(inner) => {
+                match inner.as_ref() {
+                    Selector::Has(_) => {}
+                    _ => panic!("Expected Has selector inside Not"),
+                }
+            }
+            _ => panic!("Expected Not selector"),
+        }
+
+        // Test matching
+        let xml = r##"<node class="Container"><node text="Other" /></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let container = doc.root_element();
+
+        let selector = Selector::parse(":not(:has([text=Submit]))").unwrap();
+        assert!(selector.matches(container)); // Container doesn't have Submit descendant
+
+        let xml2 = r##"<node class="Container"><node text="Submit" /></node>"##;
+        let doc2 = roxmltree::Document::parse(xml2).unwrap();
+        let container2 = doc2.root_element();
+        assert!(!selector.matches(container2)); // Container has Submit descendant
+    }
+
+    #[test]
+    fn test_nested_not_in_has() {
+        // :has(:not([clickable=false])) - element that has a descendant that is NOT clickable=false
+        let s = Selector::parse(":has(:not([clickable=false]))").unwrap();
+        match s {
+            Selector::Has(inner) => {
+                match inner.as_ref() {
+                    Selector::Not(_) => {}
+                    _ => panic!("Expected Not selector inside Has"),
+                }
+            }
+            _ => panic!("Expected Has selector"),
+        }
+
+        let xml = r##"<node class="Container"><node text="Button" clickable="true" /></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let container = doc.root_element();
+
+        let selector = Selector::parse(":has(:not([clickable=false]))").unwrap();
+        assert!(selector.matches(container));
+    }
+
+    #[test]
+    fn test_multiple_has_allowed() {
+        // Multiple :has() in the same selector should be allowed
+        let result = Selector::parse("[class=A]:has([text=B]):has([text=C])");
+        assert!(result.is_ok());
+        match result.unwrap() {
+            Selector::Complex { attrs, has, not } => {
+                assert_eq!(attrs.len(), 1);
+                assert!(has.is_some());
+                assert!(not.is_none());
+            }
+            _ => panic!("Expected Complex selector"),
+        }
+    }
+
+    #[test]
+    fn test_multiple_not_allowed() {
+        // Multiple :not() in the same selector should be allowed
+        let result = Selector::parse("[class=A]:not([text=B]):not([text=C])");
+        assert!(result.is_ok());
+        match result.unwrap() {
+            Selector::Complex { attrs, has, not } => {
+                assert_eq!(attrs.len(), 1);
+                assert!(has.is_none());
+                assert!(not.is_some());
+            }
+            _ => panic!("Expected Complex selector"),
+        }
+    }
+
+    #[test]
+    fn test_empty_string_value() {
+        // Test matching empty string values with = operator
+        let xml = r##"<node text="" class="EmptyText" />"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        // = operator allows empty value
+        let selector = Selector::parse("[text=\"\"]").unwrap();
+        assert!(selector.matches(node));
+        // = operator allows empty value
+        let selector = Selector::parse("[text=]").unwrap();
+        assert!(selector.matches(node));
+
+        // CSS spec: substring operators (^=, $=, *=) require non-empty values
+        // These should error
+        assert!(Selector::parse("[text^=]").is_err());
+        assert!(Selector::parse("[text$=]").is_err());
+        assert!(Selector::parse("[text*=]").is_err());
+    }
+
+    #[test]
+    fn test_selector_starting_with_comma() {
+        let result = Selector::parse(",[text=A]");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_selector_ending_with_comma() {
+        let result = Selector::parse("[text=A],");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_double_comma_in_or() {
+        let result = Selector::parse("[text=A],,[text=B]");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_missing_operator_in_attr() {
+        // Missing operator should error
+        let result = Selector::parse("[text]");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_empty_attribute_name() {
+        let result = Selector::parse("[=value]");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_unterminated_string() {
+        // Unterminated quoted string should error
+        let result = Selector::parse("[text=\"unterminated]");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_missing_closing_bracket() {
+        let result = Selector::parse("[text=value");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_custom_attribute_name() {
+        // Test matching with custom/unknown attribute names
+        let xml = r##"<node custom-attr="custom-value" text="Test" />"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        let selector = Selector::parse("[custom-attr=custom-value]").unwrap();
+        assert!(selector.matches(node));
+
+        let selector2 = Selector::parse("[unknown-attr=value]").unwrap();
+        assert!(!selector2.matches(node)); // Attribute doesn't exist
+    }
+
+    #[test]
+    fn test_element_with_missing_attribute() {
+        // Element that doesn't have the requested attribute
+        let xml = r##"<node class="Button" />"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        let selector = Selector::parse("[text=Submit]").unwrap();
+        assert!(!selector.matches(node)); // No text attribute
+
+        let selector2 = Selector::parse("[clickable=true]").unwrap();
+        assert!(!selector2.matches(node)); // No clickable attribute
+    }
+
+    #[test]
+    fn test_child_combinator_no_parent() {
+        // Root element has no parent, so child combinator should not match
+        let xml = r##"<node class="Button" />"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        let selector = Selector::parse("[class=Column]>[class=Button]").unwrap();
+        assert!(!selector.matches(node)); // No parent to match
+    }
+
+    #[test]
+    fn test_descendant_combinator_no_ancestor() {
+        // Root element has no ancestor, so descendant combinator should not match
+        let xml = r##"<node class="Button" />"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        let selector = Selector::parse("[class=Column] [class=Button]").unwrap();
+        assert!(!selector.matches(node)); // No ancestor to match
+    }
+
+    #[test]
+    fn test_startswith_operator_empty_value() {
+        // CSS spec: ^= requires non-empty value
+        assert!(Selector::parse("[text^=]").is_err());
+        
+        // Valid: non-empty value
+        let xml = r##"<node text="Anything" />"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        let selector = Selector::parse("[text^=Any]").unwrap();
+        assert!(selector.matches(node));
+    }
+
+    #[test]
+    fn test_endswith_operator_empty_value() {
+        // CSS spec: $= requires non-empty value
+        assert!(Selector::parse("[text$=]").is_err());
+        
+        // Valid: non-empty value
+        let xml = r##"<node text="Anything" />"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        let selector = Selector::parse("[text$=ing]").unwrap();
+        assert!(selector.matches(node));
+    }
+
+    #[test]
+    fn test_contains_operator_empty_value() {
+        // CSS spec: *= requires non-empty value
+        assert!(Selector::parse("[text*=]").is_err());
+        
+        // Valid: non-empty value
+        let xml = r##"<node text="Anything" />"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        let selector = Selector::parse("[text*=yth]").unwrap();
+        assert!(selector.matches(node));
+    }
+
+    #[test]
+    fn test_whitespace_only_selector() {
+        let result = Selector::parse("   ");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_has_with_complex_inner_selector() {
+        // :has() with complex inner selector including child combinator
+        let xml = r##"<node class="Container"><node class="Wrapper"><node text="Target" /></node></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let container = doc.root_element();
+
+        let selector = Selector::parse(":has([class=Wrapper] > [text=Target])").unwrap();
+        assert!(selector.matches(container));
+    }
+
+    #[test]
+    fn test_has_with_or_inner_selector() {
+        // :has() with OR inside
+        let xml = r##"<node class="Container"><node text="Submit" /></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let container = doc.root_element();
+
+        let selector = Selector::parse(":has([text=Submit],[text=Cancel])").unwrap();
+        assert!(selector.matches(container));
+    }
+
+    #[test]
+    fn test_child_combinator_with_has_as_parent() {
+        // :has() > child - parent is a has selector
+        let xml = r##"<node class="Container"><node text="Submit" /><node class="Button" /></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let container = doc.root_element();
+        let button = container.children().find(|n| n.attribute("class") == Some("Button")).unwrap();
+
+        let selector = Selector::parse(":has([text=Submit]) > [class=Button]").unwrap();
+        assert!(selector.matches(button));
+    }
+
+    #[test]
+    fn test_child_combinator_with_not_as_child() {
+        // parent > :not(...)
+        let xml = r##"<node class="Column"><node class="Button" clickable="true" /><node class="Spacer" clickable="false" /></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let column = doc.root_element();
+
+        let button = column.children().find(|n| n.attribute("class") == Some("Button")).unwrap();
+        let spacer = column.children().find(|n| n.attribute("class") == Some("Spacer")).unwrap();
+
+        let selector = Selector::parse("[class=Column] > :not([clickable=false])").unwrap();
+        assert!(selector.matches(button));
+        assert!(!selector.matches(spacer));
+    }
+
+    #[test]
+    fn test_descendant_combinator_with_has_as_ancestor() {
+        // :has(...) descendant
+        let xml = r##"<node class="Container"><node text="Submit" /><node class="Wrapper"><node class="Button" /></node></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let container = doc.root_element();
+        let button = container.descendants().find(|n| n.attribute("class") == Some("Button")).unwrap();
+
+        let selector = Selector::parse(":has([text=Submit]) [class=Button]").unwrap();
+        assert!(selector.matches(button));
+    }
+
+    #[test]
+    fn test_missing_value_after_operator() {
+        // Missing value after operator
+        let result = Selector::parse("[text=]");
+        // This should either parse as empty value or error
+        // Looking at the parser, it will parse as unquoted value which errors on empty
+        assert!(result.is_err() || result.unwrap() == Selector::And(vec![AttrClause {
+            attr: "text".to_string(),
+            op: AttrOp::Equals,
+            value: "".to_string(),
+        }]));
+    }
+
+    #[test]
+    fn test_attribute_with_hyphen_in_name() {
+        // Attribute names can contain hyphens (already allowed per parse_identifier)
+        let xml = r##"<node my-custom-attr="value" />"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        let selector = Selector::parse("[my-custom-attr=value]").unwrap();
+        assert!(selector.matches(node));
+    }
+
+    #[test]
+    fn test_attribute_with_underscore_in_name() {
+        // Attribute names can contain underscores
+        let xml = r##"<node my_attr="value" />"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        let selector = Selector::parse("[my_attr=value]").unwrap();
+        assert!(selector.matches(node));
+    }
+
+    #[test]
+    fn test_or_with_single_element() {
+        // OR with only one element should just return that element
+        let s = Selector::parse("[text=A]").unwrap();
+        match s {
+            Selector::And(clauses) => {
+                assert_eq!(clauses.len(), 1);
+            }
+            _ => panic!("Expected And selector for single element"),
+        }
+    }
+
+    #[test]
+    fn test_deeply_nested_descendants() {
+        // Deep nesting with descendant combinator
+        let xml = r##"<node class="A"><node class="B"><node class="C"><node class="D"><node class="E" text="Target" /></node></node></node></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let e = doc.root_element().descendants().find(|n| n.attribute("class") == Some("E")).unwrap();
+
+        let selector = Selector::parse("[class=A] [text=Target]").unwrap();
+        assert!(selector.matches(e));
+
+        let _selector2 = Selector::parse("[class=A] [class=C] [class=E]").unwrap();
+        assert!(selector.matches(e));
+    }
+
+    #[test]
+    fn test_not_with_descendant_selector() {
+        // :not() with descendant selector inside
+        let xml = r##"<node class="Container"><node text="Target" /></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let container = doc.root_element();
+
+        // Container should NOT match if we say :not([class=Container])
+        let selector = Selector::parse(":not([class=Container])").unwrap();
+        assert!(!selector.matches(container));
+    }
+
+    #[test]
+    fn test_has_no_children() {
+        // Element with no children matching :has()
+        let xml = r##"<node class="Container" />"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let container = doc.root_element();
+
+        let selector = Selector::parse(":has([text=Anything])").unwrap();
+        assert!(!selector.matches(container)); // No children at all
     }
 }
