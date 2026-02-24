@@ -14,7 +14,7 @@ Bochi is a command line tool for AI agents to control Android devices via ADB. U
 
 - Uses `adb shell uiautomator dump` to obtain UI layout information
 - Supports CSS-like element selectors with attribute assertions, AND/OR logic, descendant matching, and negation
-- Commands: `waitFor`, `tap`, `inputText`
+- Commands: `waitFor`, `tap`, `inputText`, `longTap`, `doubleTap`
 - Configurable timeout
 
 ## Installation
@@ -52,6 +52,15 @@ Command-Specific Parameters:
       --text <TEXT>        Text content for inputText command
       --print-descendants  Print the XML of matched elements including their descendants (for waitFor command)
 ```
+
+## Commands 
+All commands are executed against the elements matched by the selector. If the element is not found within the specified timeout, an error will be returned. If there are multiple elements matched, the command will be executed against the **first** element.
+
+- `waitFor`: Wait for an element to appear
+- `tap`: Tap an element
+- `inputText`: Input text into an element
+- `longTap`: Long tap (1000ms) an element
+- `doubleTap`: Double tap an element
 
 ## Selector Syntax
 

@@ -89,6 +89,52 @@ fn tap_element(serial: Option<&str>, element: &UiElement) -> Result<(), String> 
     Ok(())
 }
 
+fn long_tap_element(
+    serial: Option<&str>,
+    element: &UiElement,
+    duration_ms: u64,
+) -> Result<(), String> {
+    let (x1, y1, x2, y2) = element.bounds;
+    let center_x = (x1 + x2) / 2;
+    let center_y = (y1 + y2) / 2;
+
+    // Use swipe with same start and end position to simulate a long press
+    let output = get_adb_command(serial)
+        .map_err(|e| format_adb_error(&e))?
+        .args([
+            "shell",
+            "input",
+            "swipe",
+            &center_x.to_string(),
+            &center_y.to_string(),
+            &center_x.to_string(),
+            &center_y.to_string(),
+            &duration_ms.to_string(),
+        ])
+        .output()
+        .map_err(|e| format_adb_error(&e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Long tap command failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(())
+}
+
+fn double_tap_element(serial: Option<&str>, element: &UiElement) -> Result<(), String> {
+    // First tap
+    tap_element(serial, element)?;
+
+    // Small delay between taps (typical double tap timing)
+    thread::sleep(Duration::from_millis(100));
+
+    // Second tap
+    tap_element(serial, element)
+}
+
 fn input_text_element(serial: Option<&str>, element: &UiElement, text: &str) -> Result<(), String> {
     // First tap to focus on the element
     tap_element(serial, element)?;
@@ -186,8 +232,16 @@ fn main() {
             },
             None => Err("--text parameter is required for inputText command".to_string()),
         },
+        "longTap" => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
+            Ok(element) => long_tap_element(cli.serial.as_deref(), &element, 1000),
+            Err(e) => Err(e),
+        },
+        "doubleTap" => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
+            Ok(element) => double_tap_element(cli.serial.as_deref(), &element),
+            Err(e) => Err(e),
+        },
         _ => Err(format!(
-            "Unknown command: {}. Supported: waitFor, tap, inputText",
+            "Unknown command: {}. Supported: waitFor, tap, longTap, doubleTap, inputText",
             cli.command
         )),
     };
