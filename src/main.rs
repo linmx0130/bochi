@@ -10,6 +10,20 @@ use std::thread;
 use std::time::{Duration, Instant};
 use ui_element::{find_elements, find_elements_with_descendants, get_ui_hierarchy, UiElement};
 
+#[derive(clap::ValueEnum, Clone, Debug)]
+enum BochiCommand {
+    #[value(name = "waitFor")]
+    WaitFor,
+    #[value(name = "tap")]
+    Tap,
+    #[value(name = "inputText")]
+    InputText,
+    #[value(name = "longTap")]
+    LongTap,
+    #[value(name = "doubleTap")]
+    DoubleTap,
+}
+
 #[derive(Parser)]
 #[command(name = "bochi")]
 #[command(about = "A CLI tool for AI agents to control Android devices via ADB")]
@@ -17,14 +31,18 @@ struct Cli {
     #[arg(short, long, help_heading = "Common Parameters", display_order = 1)]
     serial: Option<String>,
 
-    /// Element selector. Supports CSS-like syntax:
-    /// - [attr=value] - attribute assertion
-    /// - [attr1=v1][attr2=v2] - AND of clauses
-    /// - sel1,sel2 - OR of selectors
-    /// - :has(cond) - has descendant matching cond
+    /// Element selector
     #[arg(
         short = 'e',
         long,
+        help = "Element selector",
+        long_help = r#"Element selector.
+
+Supports CSS-like syntax:
+- [attr=value] - attribute assertion
+- [attr1=v1][attr2=v2] - AND of clauses
+- sel1,sel2 - OR of selectors
+- :has(cond) - has descendant matching cond"#,
         help_heading = "Common Parameters",
         display_order = 2
     )]
@@ -33,10 +51,11 @@ struct Cli {
     #[arg(
         short = 'c',
         long,
+        help = "Command to run",
         help_heading = "Common Parameters",
         display_order = 3
     )]
-    command: String,
+    command: BochiCommand,
 
     /// Text content for inputText command
     #[arg(long, help_heading = "Command-Specific Parameters", display_order = 10)]
@@ -208,8 +227,8 @@ fn main() {
         }
     };
 
-    let result = match cli.command.as_str() {
-        "waitFor" => wait_for_elements(
+    let result = match cli.command {
+        BochiCommand::WaitFor => wait_for_elements(
             cli.serial.as_deref(),
             &selector,
             cli.timeout,
@@ -220,29 +239,25 @@ fn main() {
                 println!("{}", element.raw_xml);
             }
         }),
-        "tap" => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
+        BochiCommand::Tap => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
             Ok(element) => tap_element(cli.serial.as_deref(), &element),
             Err(e) => Err(e),
         },
-        "inputText" => match cli.text {
+        BochiCommand::InputText => match cli.text {
             Some(text) => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
                 Ok(element) => input_text_element(cli.serial.as_deref(), &element, &text),
                 Err(e) => Err(e),
             },
             None => Err("--text parameter is required for inputText command".to_string()),
         },
-        "longTap" => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
+        BochiCommand::LongTap => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
             Ok(element) => long_tap_element(cli.serial.as_deref(), &element, 1000),
             Err(e) => Err(e),
         },
-        "doubleTap" => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
+        BochiCommand::DoubleTap => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
             Ok(element) => double_tap_element(cli.serial.as_deref(), &element),
             Err(e) => Err(e),
         },
-        _ => Err(format!(
-            "Unknown command: {}. Supported: waitFor, tap, longTap, doubleTap, inputText",
-            cli.command
-        )),
     };
 
     match result {
