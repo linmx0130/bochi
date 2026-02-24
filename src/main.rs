@@ -14,7 +14,7 @@ use ui_element::{find_elements, find_elements_with_descendants, get_ui_hierarchy
 #[command(name = "bochi")]
 #[command(about = "A CLI tool for AI agents to control Android devices via ADB")]
 struct Cli {
-    #[arg(short, long)]
+    #[arg(short, long, help_heading = "Common Parameters", display_order = 1)]
     serial: Option<String>,
 
     /// Element selector. Supports CSS-like syntax:
@@ -23,21 +23,42 @@ struct Cli {
     /// - sel1,sel2 - OR of selectors
     /// - :has(cond) - has descendant matching cond
     /// Also supports legacy format: field=value
-    #[arg(short = 'e', long)]
+    #[arg(
+        short = 'e',
+        long,
+        help_heading = "Common Parameters",
+        display_order = 2
+    )]
     selector: String,
 
-    #[arg(short = 'c', long)]
+    #[arg(
+        short = 'c',
+        long,
+        help_heading = "Common Parameters",
+        display_order = 3
+    )]
     command: String,
 
     /// Text content for inputText command
-    #[arg(long)]
+    #[arg(long, help_heading = "Command-Specific Parameters", display_order = 10)]
     text: Option<String>,
 
-    #[arg(short, long, default_value = "30")]
+    #[arg(
+        short,
+        long,
+        default_value = "30",
+        help_heading = "Common Parameters",
+        display_order = 4
+    )]
     timeout: u64,
 
-    /// Print the XML of matched elements including their descendants
-    #[arg(long, default_value = "false")]
+    /// Print the XML of matched elements including their descendants (for waitFor command)
+    #[arg(
+        long,
+        default_value = "false",
+        help_heading = "Command-Specific Parameters",
+        display_order = 20
+    )]
     print_descendants: bool,
 }
 
@@ -71,19 +92,14 @@ fn tap_element(serial: Option<&str>, element: &UiElement) -> Result<(), String> 
 fn input_text_element(serial: Option<&str>, element: &UiElement, text: &str) -> Result<(), String> {
     // First tap to focus on the element
     tap_element(serial, element)?;
-    
+
     // Small delay to ensure the element is focused
     thread::sleep(Duration::from_millis(100));
-    
+
     // Then type the text
     let output = get_adb_command(serial)
         .map_err(|e| format_adb_error(&e))?
-        .args([
-            "shell",
-            "input",
-            "text",
-            text,
-        ])
+        .args(["shell", "input", "text", text])
         .output()
         .map_err(|e| format_adb_error(&e))?;
 
@@ -148,14 +164,17 @@ fn main() {
     };
 
     let result = match cli.command.as_str() {
-        "waitFor" => {
-            wait_for_elements(cli.serial.as_deref(), &selector, cli.timeout, cli.print_descendants)
-                .map(|elements| {
-                    for element in elements {
-                        println!("{}", element.raw_xml);
-                    }
-                })
-        }
+        "waitFor" => wait_for_elements(
+            cli.serial.as_deref(),
+            &selector,
+            cli.timeout,
+            cli.print_descendants,
+        )
+        .map(|elements| {
+            for element in elements {
+                println!("{}", element.raw_xml);
+            }
+        }),
         "tap" => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
             Ok(element) => tap_element(cli.serial.as_deref(), &element),
             Err(e) => Err(e),

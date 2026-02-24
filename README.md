@@ -28,6 +28,7 @@ cargo install bochi
 ### Build from source
 
 ```bash
+git clone https://github.com/linmx0130/bochi.git && cd bochi
 cargo build --release
 ```
 
@@ -39,13 +40,17 @@ The binary will be available at `target/release/bochi`.
 bochi [OPTIONS] --selector <SELECTOR> --command <COMMAND>
 
 Options:
-  -s, --serial <SERIAL>      Device serial number (optional if only one device)
-  -e, --selector <SELECTOR>  Element selector (CSS-like syntax)
-  -c, --command <COMMAND>    Command to perform: waitFor, tap, inputText
-      --text <TEXT>          Text content for inputText command
-  -t, --timeout <TIMEOUT>    Timeout in seconds [default: 30]
-      --print-descendants    Print the XML of matched elements including their descendants (for waitFor command)
-  -h, --help                 Print help
+  -h, --help  Print help
+
+Common Parameters:
+  -s, --serial <SERIAL>
+  -e, --selector <SELECTOR>  Element selector. Supports CSS-like syntax: - [attr=value] - attribute assertion - [attr1=v1][attr2=v2] - AND of clauses - sel1,sel2 - OR of selectors - :has(cond) - has descendant matching cond Also supports legacy format: field=value
+  -c, --command <COMMAND>
+  -t, --timeout <TIMEOUT>    [default: 30]
+
+Command-Specific Parameters:
+      --text <TEXT>        Text content for inputText command
+      --print-descendants  Print the XML of matched elements including their descendants (for waitFor command)
 ```
 
 ## Selector Syntax
