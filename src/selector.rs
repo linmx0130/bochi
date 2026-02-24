@@ -64,49 +64,13 @@ pub enum AttrOp {
 
 impl Selector {
     /// Parse a selector string into a Selector AST
-    /// Supports both CSS-like syntax [attr=value] and legacy syntax attr=value
+    /// Supports CSS-like syntax [attr=value]
     pub fn parse(s: &str) -> Result<Selector, String> {
         let trimmed = s.trim();
-        
-        // Try CSS-like syntax first
         let mut parser = SelectorParser::new(trimmed);
-        match parser.parse() {
-            Ok(selector) => Ok(selector),
-            Err(_) => {
-                // Try legacy format: FIELD_NAME=VALUE
-                Self::parse_legacy(trimmed)
-            }
-        }
+        parser.parse()
     }
 
-    /// Parse legacy format: FIELD_NAME=VALUE
-    fn parse_legacy(s: &str) -> Result<Selector, String> {
-        // Check if it looks like the old format (no brackets, contains =)
-        if s.contains('=') && !s.contains('[') && !s.contains(':') {
-            let parts: Vec<&str> = s.splitn(2, '=').collect();
-            if parts.len() == 2 {
-                let field = parts[0].trim();
-                let mut value = parts[1].trim();
-                
-                // Remove surrounding quotes if present
-                if (value.starts_with('"') && value.ends_with('"'))
-                    || (value.starts_with('\'') && value.ends_with('\''))
-                {
-                    value = &value[1..value.len() - 1];
-                }
-                
-                if !field.is_empty() && !value.is_empty() {
-                    return Ok(Selector::And(vec![AttrClause {
-                        attr: field.to_string(),
-                        op: AttrOp::Equals,
-                        value: value.to_string(),
-                    }]));
-                }
-            }
-        }
-        
-        Err(format!("Invalid selector format: {}", s))
-    }
 
     /// Check if the given XML node matches this selector
     pub fn matches(&self, node: roxmltree::Node) -> bool {
@@ -820,34 +784,6 @@ mod tests {
         assert!(Selector::parse("").is_err());
     }
 
-    #[test]
-    fn test_parse_legacy_format() {
-        // Legacy format text=Submit should now work as [text=Submit]
-        let s = Selector::parse("text=Submit").unwrap();
-        match s {
-            Selector::And(clauses) => {
-                assert_eq!(clauses.len(), 1);
-                assert_eq!(clauses[0].attr, "text");
-                assert_eq!(clauses[0].op, AttrOp::Equals);
-                assert_eq!(clauses[0].value, "Submit");
-            }
-            _ => panic!("Expected And selector"),
-        }
-    }
-
-    #[test]
-    fn test_parse_legacy_with_quotes() {
-        let s = Selector::parse("text=\"Submit Button\"").unwrap();
-        match s {
-            Selector::And(clauses) => {
-                assert_eq!(clauses.len(), 1);
-                assert_eq!(clauses[0].attr, "text");
-                assert_eq!(clauses[0].op, AttrOp::Equals);
-                assert_eq!(clauses[0].value, "Submit Button");
-            }
-            _ => panic!("Expected And selector"),
-        }
-    }
 
     #[test]
     fn test_parse_invalid_unclosed_bracket() {
@@ -985,11 +921,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_backward_compatible_simple_format() {
-        // The old format text=Submit should still work
-        // We need to handle this by auto-converting to [text=Submit]
-    }
 
     // Tests for new operators: ^=, $=, *=
     #[test]

@@ -44,7 +44,7 @@ Options:
 
 Common Parameters:
   -s, --serial <SERIAL>
-  -e, --selector <SELECTOR>  Element selector. Supports CSS-like syntax: - [attr=value] - attribute assertion - [attr1=v1][attr2=v2] - AND of clauses - sel1,sel2 - OR of selectors - :has(cond) - has descendant matching cond Also supports legacy format: field=value
+  -e, --selector <SELECTOR>  Element selector. Supports CSS-like syntax: - [attr=value] - attribute assertion - [attr1=v1][attr2=v2] - AND of clauses - sel1,sel2 - OR of selectors - :has(cond) - has descendant matching cond
   -c, --command <COMMAND>
   -t, --timeout <TIMEOUT>    [default: 30]
 

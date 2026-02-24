@@ -22,7 +22,6 @@ struct Cli {
     /// - [attr1=v1][attr2=v2] - AND of clauses
     /// - sel1,sel2 - OR of selectors
     /// - :has(cond) - has descendant matching cond
-    /// Also supports legacy format: field=value
     #[arg(
         short = 'e',
         long,
