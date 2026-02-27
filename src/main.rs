@@ -12,14 +12,19 @@ use ui_element::{find_elements, find_elements_with_descendants, get_ui_hierarchy
 
 #[derive(clap::ValueEnum, Clone, Debug)]
 enum BochiCommand {
+    /// Wait for an element to appear
     #[value(name = "waitFor")]
     WaitFor,
+    /// Tap an element
     #[value(name = "tap")]
     Tap,
+    /// Input text into an element
     #[value(name = "inputText")]
     InputText,
+    /// Long tap an element
     #[value(name = "longTap")]
     LongTap,
+    /// Double tap an element
     #[value(name = "doubleTap")]
     DoubleTap,
 }
@@ -39,10 +44,13 @@ struct Cli {
         long_help = r#"Element selector.
 
 Supports CSS-like syntax:
-- [attr=value] - attribute assertion
-- [attr1=v1][attr2=v2] - AND of clauses
-- sel1,sel2 - OR of selectors
-- :has(cond) - has descendant matching cond"#,
+ - `[attr="value"]` or `[attr=value]` - attribute assertion
+ - `[attr1="v1"][attr2="v2"]` - AND of multiple clauses (no space)
+ - `sel1,sel2` - OR of multiple selectors
+ - `:has(cond)` - select nodes with a descendant matching cond
+ - `:not(cond)` - select nodes that do NOT match cond
+ - `ancestor > child` - child combinator (direct children only)
+ - `ancestor descendant` - descendant combinator (any depth)"#,
         help_heading = "Common Parameters",
         display_order = 2
     )]
@@ -239,10 +247,12 @@ fn main() {
                 println!("{}", element.raw_xml);
             }
         }),
-        BochiCommand::Tap => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
-            Ok(element) => tap_element(cli.serial.as_deref(), &element),
-            Err(e) => Err(e),
-        },
+        BochiCommand::Tap => {
+            match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
+                Ok(element) => tap_element(cli.serial.as_deref(), &element),
+                Err(e) => Err(e),
+            }
+        }
         BochiCommand::InputText => match cli.text {
             Some(text) => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
                 Ok(element) => input_text_element(cli.serial.as_deref(), &element, &text),
@@ -250,14 +260,18 @@ fn main() {
             },
             None => Err("--text parameter is required for inputText command".to_string()),
         },
-        BochiCommand::LongTap => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
-            Ok(element) => long_tap_element(cli.serial.as_deref(), &element, 1000),
-            Err(e) => Err(e),
-        },
-        BochiCommand::DoubleTap => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
-            Ok(element) => double_tap_element(cli.serial.as_deref(), &element),
-            Err(e) => Err(e),
-        },
+        BochiCommand::LongTap => {
+            match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
+                Ok(element) => long_tap_element(cli.serial.as_deref(), &element, 1000),
+                Err(e) => Err(e),
+            }
+        }
+        BochiCommand::DoubleTap => {
+            match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
+                Ok(element) => double_tap_element(cli.serial.as_deref(), &element),
+                Err(e) => Err(e),
+            }
+        }
     };
 
     match result {

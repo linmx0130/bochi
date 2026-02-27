@@ -56,10 +56,10 @@ pub struct AttrClause {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AttrOp {
-    Equals,       // =
-    StartsWith,   // ^=
-    EndsWith,     // $=
-    Contains,     // *=
+    Equals,     // =
+    StartsWith, // ^=
+    EndsWith,   // $=
+    Contains,   // *=
 }
 
 impl Selector {
@@ -70,7 +70,6 @@ impl Selector {
         let mut parser = SelectorParser::new(trimmed);
         parser.parse()
     }
-
 
     /// Check if the given XML node matches this selector
     pub fn matches(&self, node: roxmltree::Node) -> bool {
@@ -109,7 +108,10 @@ impl Selector {
                     false
                 }
             }
-            Selector::Descendant { ancestor, descendant } => {
+            Selector::Descendant {
+                ancestor,
+                descendant,
+            } => {
                 // First check if current node matches descendant selector
                 if !descendant.matches(node) {
                     return false;
@@ -206,7 +208,7 @@ impl<'a> SelectorParser<'a> {
     /// Parse OR expression (comma-separated selectors)
     fn parse_or_expr(&mut self) -> Result<Selector, String> {
         let mut selectors = vec![];
-        
+
         loop {
             self.skip_whitespace();
             if self.is_eof() {
@@ -219,10 +221,10 @@ impl<'a> SelectorParser<'a> {
             }
             selectors.push(self.parse_descendant_chain()?);
             self.skip_whitespace();
-            
+
             if self.peek() == Some(',') {
                 self.advance(); // consume ','
-                // Check if there's a selector after this comma
+                                // Check if there's a selector after this comma
                 self.skip_whitespace();
                 if self.is_eof() || self.peek() == Some(',') {
                     // Trailing comma or double comma - error
@@ -236,7 +238,7 @@ impl<'a> SelectorParser<'a> {
         if selectors.is_empty() {
             return Err("Empty selector".to_string());
         }
-        
+
         if selectors.len() == 1 {
             Ok(selectors.into_iter().next().unwrap())
         } else {
@@ -249,7 +251,7 @@ impl<'a> SelectorParser<'a> {
     fn parse_descendant_chain(&mut self) -> Result<Selector, String> {
         // First parse a child combinator chain
         let mut left = self.parse_child_combinator()?;
-        
+
         loop {
             // Check if there's significant whitespace followed by another selector
             // We need to differentiate between:
@@ -257,12 +259,12 @@ impl<'a> SelectorParser<'a> {
             // - "[text=A]" followed by end of input or ","
             let saved_pos = self.pos;
             self.skip_whitespace();
-            
+
             // If we're at end of input, comma, or closing paren, stop
             if self.is_eof() || self.peek() == Some(',') || self.peek() == Some(')') {
                 break;
             }
-            
+
             // Check if the next character can start a selector
             // A selector can start with '[' (attribute), ':' (:has, :not), or '>' is handled by child combinator
             match self.peek() {
@@ -287,7 +289,7 @@ impl<'a> SelectorParser<'a> {
                 }
             }
         }
-        
+
         Ok(left)
     }
 
@@ -295,16 +297,16 @@ impl<'a> SelectorParser<'a> {
     /// Builds a left-associative tree: A > B > C becomes ((A > B) > C)
     fn parse_child_combinator(&mut self) -> Result<Selector, String> {
         let mut left = self.parse_complex_selector()?;
-        
+
         loop {
             self.skip_whitespace();
-            
+
             // Check for child combinator >
             if self.peek() == Some('>') {
                 self.advance(); // consume '>'
                 self.skip_whitespace();
                 let right = self.parse_complex_selector()?;
-                
+
                 // Build left-associative: left becomes (left > right)
                 left = Selector::Child {
                     parent: Box::new(left),
@@ -314,14 +316,14 @@ impl<'a> SelectorParser<'a> {
                 break;
             }
         }
-        
+
         Ok(left)
     }
 
     /// Parse a complex selector that may have :has() or :not() at the end
     fn parse_complex_selector(&mut self) -> Result<Selector, String> {
         self.skip_whitespace();
-        
+
         // Check if it starts with :has() or :not()
         if self.peek() == Some(':') {
             if self.input[self.pos..].starts_with(":has(") {
@@ -330,17 +332,17 @@ impl<'a> SelectorParser<'a> {
                 return self.parse_not_selector();
             }
         }
-        
+
         // Parse attribute clauses
         let clauses = self.parse_attr_clauses()?;
-        
+
         self.skip_whitespace();
-        
+
         // Check for :has() or :not() after attribute clauses
         if self.peek() == Some(':') {
             let mut has_selector: Option<Box<Selector>> = None;
             let mut not_selector: Option<Box<Selector>> = None;
-            
+
             // Parse any number of :has() and :not() suffixes
             // Multiple :has() or :not() are allowed - last one wins
             loop {
@@ -348,7 +350,7 @@ impl<'a> SelectorParser<'a> {
                 if self.peek() != Some(':') {
                     break;
                 }
-                
+
                 if self.input[self.pos..].starts_with(":has(") {
                     has_selector = Some(self.parse_has_selector_suffix()?);
                 } else if self.input[self.pos..].starts_with(":not(") {
@@ -357,11 +359,11 @@ impl<'a> SelectorParser<'a> {
                     break;
                 }
             }
-            
+
             if clauses.is_empty() && has_selector.is_none() && not_selector.is_none() {
                 return Err("Expected attribute clause, :has() or :not()".to_string());
             }
-            
+
             if has_selector.is_some() || not_selector.is_some() {
                 Ok(Selector::Complex {
                     attrs: clauses,
@@ -419,7 +421,7 @@ impl<'a> SelectorParser<'a> {
     /// Parse selector inside :has() parentheses
     fn parse_inner_selector(&mut self) -> Result<Box<Selector>, String> {
         self.skip_whitespace();
-        
+
         // Find the matching closing paren, accounting for nested parens
         let start = self.pos;
         let mut depth = 1;
@@ -439,11 +441,11 @@ impl<'a> SelectorParser<'a> {
                 _ => self.advance(),
             }
         }
-        
+
         let selector_str = &self.input[start..self.pos];
         let inner_selector = Selector::parse(selector_str)
             .map_err(|e| format!("Invalid selector inside :has(): {}", e))?;
-        
+
         Ok(Box::new(inner_selector))
     }
 
@@ -451,18 +453,18 @@ impl<'a> SelectorParser<'a> {
     /// Stops if there's significant whitespace before the next `[` to allow for descendant combinator
     fn parse_attr_clauses(&mut self) -> Result<Vec<AttrClause>, String> {
         let mut clauses = vec![];
-        
+
         loop {
             // Check if next non-whitespace char is '['
             let saved_pos = self.pos;
             self.skip_whitespace();
-            
+
             if self.peek() != Some('[') {
                 // Not an attribute clause, restore position and break
                 self.pos = saved_pos;
                 break;
             }
-            
+
             // If we skipped whitespace (meaning there was whitespace before '['),
             // and we already have at least one clause, treat this as a descendant combinator
             // by restoring position and breaking
@@ -470,10 +472,10 @@ impl<'a> SelectorParser<'a> {
                 self.pos = saved_pos;
                 break;
             }
-            
+
             clauses.push(self.parse_attr_clause()?);
         }
-        
+
         Ok(clauses)
     }
 
@@ -481,31 +483,28 @@ impl<'a> SelectorParser<'a> {
     fn parse_attr_clause(&mut self) -> Result<AttrClause, String> {
         self.expect_char('[')?;
         self.skip_whitespace();
-        
+
         let attr = self.parse_identifier()?;
-        
+
         self.skip_whitespace();
         let op = self.parse_operator()?;
         self.skip_whitespace();
-        
+
         let value = self.parse_value()?;
-        
+
         // CSS spec: substring operators (^=, $=, *=) require non-empty values
         match op {
             AttrOp::StartsWith | AttrOp::EndsWith | AttrOp::Contains => {
                 if value.is_empty() {
-                    return Err(format!(
-                        "Empty value not allowed for {:?} operator",
-                        op
-                    ));
+                    return Err(format!("Empty value not allowed for {:?} operator", op));
                 }
             }
             AttrOp::Equals => {} // Empty value allowed for =
         }
-        
+
         self.skip_whitespace();
         self.expect_char(']')?;
-        
+
         Ok(AttrClause { attr, op, value })
     }
 
@@ -542,7 +541,7 @@ impl<'a> SelectorParser<'a> {
     /// Parse an identifier (attribute name)
     fn parse_identifier(&mut self) -> Result<String, String> {
         let start = self.pos;
-        
+
         while let Some(c) = self.peek() {
             if c.is_alphanumeric() || c == '_' || c == '-' {
                 self.advance();
@@ -550,11 +549,11 @@ impl<'a> SelectorParser<'a> {
                 break;
             }
         }
-        
+
         if start == self.pos {
             return Err(format!("Expected identifier at position {}", self.pos));
         }
-        
+
         Ok(self.input[start..self.pos].to_string())
     }
 
@@ -571,7 +570,7 @@ impl<'a> SelectorParser<'a> {
     fn parse_quoted_string(&mut self, quote: char) -> Result<String, String> {
         self.expect_char(quote)?;
         let start = self.pos;
-        
+
         while let Some(c) = self.peek() {
             if c == quote {
                 let value = self.input[start..self.pos].to_string();
@@ -580,22 +579,25 @@ impl<'a> SelectorParser<'a> {
             }
             self.advance();
         }
-        
-        Err(format!("Unterminated string starting at position {}", start - 1))
+
+        Err(format!(
+            "Unterminated string starting at position {}",
+            start - 1
+        ))
     }
 
     /// Parse an unquoted value (stops at ] or , or whitespace)
     /// Note: The caller should validate empty values based on the operator
     fn parse_unquoted_value(&mut self) -> Result<String, String> {
         let start = self.pos;
-        
+
         while let Some(c) = self.peek() {
             if c == ']' || c == ',' || c.is_whitespace() {
                 break;
             }
             self.advance();
         }
-        
+
         // Empty values are allowed - return empty string
         // (CSS spec: only = allows empty; ^=, $=, *= require non-empty)
         Ok(self.input[start..self.pos].to_string())
@@ -607,10 +609,7 @@ impl<'a> SelectorParser<'a> {
             self.pos += s.len();
             Ok(())
         } else {
-            Err(format!(
-                "Expected '{}' at position {}",
-                s, self.pos
-            ))
+            Err(format!("Expected '{}' at position {}", s, self.pos))
         }
     }
 
@@ -625,10 +624,7 @@ impl<'a> SelectorParser<'a> {
                 "Expected '{}' but found '{}' at position {}",
                 expected, c, self.pos
             )),
-            None => Err(format!(
-                "Expected '{}' but reached end of input",
-                expected
-            )),
+            None => Err(format!("Expected '{}' but reached end of input", expected)),
         }
     }
 
@@ -784,7 +780,6 @@ mod tests {
         assert!(Selector::parse("").is_err());
     }
 
-
     #[test]
     fn test_parse_invalid_unclosed_bracket() {
         assert!(Selector::parse("[text=Submit").is_err());
@@ -920,7 +915,6 @@ mod tests {
             _ => panic!("Expected Or selector"),
         }
     }
-
 
     // Tests for new operators: ^=, $=, *=
     #[test]
@@ -1117,10 +1111,10 @@ mod tests {
         let button = wrapper.first_element_child().unwrap();
 
         let selector = Selector::parse("[class=Column]>[clickable=true]").unwrap();
-        
+
         // The button is NOT a direct child of Column, so it should not match
         assert!(!selector.matches(button));
-        
+
         // The wrapper is the direct child
         let selector2 = Selector::parse("[class=Column]>[class=Wrapper]").unwrap();
         assert!(selector2.matches(wrapper));
@@ -1153,7 +1147,9 @@ mod tests {
         let column = doc.root_element();
         let button = column.first_element_child().unwrap();
 
-        let selector = Selector::parse("[class=Row]>[clickable=true],[class=Column]>[clickable=true]").unwrap();
+        let selector =
+            Selector::parse("[class=Row]>[clickable=true],[class=Column]>[clickable=true]")
+                .unwrap();
         assert!(selector.matches(button));
     }
 
@@ -1281,7 +1277,8 @@ mod tests {
         let button = column.first_element_child().unwrap();
 
         // Should match - button is a direct child of Column and is clickable (not false)
-        let selector = Selector::parse("[class=Column]>[clickable=true]:not([clickable=false])").unwrap();
+        let selector =
+            Selector::parse("[class=Column]>[clickable=true]:not([clickable=false])").unwrap();
         assert!(selector.matches(button));
     }
 
@@ -1292,10 +1289,12 @@ mod tests {
         let list = doc.root_element();
 
         // Both :has() and :not() together
-        let selector = Selector::parse("[class=List]:has([text=\"Item 1\"]):not([id=list2])").unwrap();
+        let selector =
+            Selector::parse("[class=List]:has([text=\"Item 1\"]):not([id=list2])").unwrap();
         assert!(selector.matches(list));
 
-        let selector2 = Selector::parse("[class=List]:has([text=\"Item 1\"]):not([id=list1])").unwrap();
+        let selector2 =
+            Selector::parse("[class=List]:has([text=\"Item 1\"]):not([id=list1])").unwrap();
         assert!(!selector2.matches(list));
     }
 
@@ -1304,7 +1303,10 @@ mod tests {
     fn test_parse_descendant_combinator() {
         let s = Selector::parse("[class=Column] [clickable=true]").unwrap();
         match s {
-            Selector::Descendant { ancestor, descendant } => {
+            Selector::Descendant {
+                ancestor,
+                descendant,
+            } => {
                 // Ancestor should be And([class=Column])
                 match ancestor.as_ref() {
                     Selector::And(clauses) => {
@@ -1333,10 +1335,16 @@ mod tests {
         // Chain: A B C
         let s = Selector::parse("[class=A] [class=B] [class=C]").unwrap();
         match s {
-            Selector::Descendant { ancestor, descendant } => {
+            Selector::Descendant {
+                ancestor,
+                descendant,
+            } => {
                 // Should be ((A B) C)
                 match ancestor.as_ref() {
-                    Selector::Descendant { ancestor, descendant } => {
+                    Selector::Descendant {
+                        ancestor,
+                        descendant,
+                    } => {
                         assert!(matches!(ancestor.as_ref(), Selector::And(_)));
                         assert!(matches!(descendant.as_ref(), Selector::And(_)));
                     }
@@ -1360,11 +1368,11 @@ mod tests {
         // The button is a descendant (grandchild) of Column, so it should match
         let selector = Selector::parse("[class=Column] [clickable=true]").unwrap();
         assert!(selector.matches(button));
-        
+
         // The wrapper is also a descendant of Column
         let selector2 = Selector::parse("[class=Column] [class=Wrapper]").unwrap();
         assert!(selector2.matches(wrapper));
-        
+
         // The column itself should not match (it's not a descendant)
         assert!(!selector.matches(column));
     }
@@ -1384,7 +1392,8 @@ mod tests {
     #[test]
     fn test_descendant_combinator_with_child() {
         // Mix of descendant and child: A > B C (C is descendant of B which is child of A)
-        let xml = r##"<node class="A"><node class="B"><node class="C" text="Target" /></node></node>"##;
+        let xml =
+            r##"<node class="A"><node class="B"><node class="C" text="Target" /></node></node>"##;
         let doc = roxmltree::Document::parse(xml).unwrap();
         let a = doc.root_element();
         let b = a.first_element_child().unwrap();
@@ -1407,7 +1416,9 @@ mod tests {
         let button = column.first_element_child().unwrap();
 
         // OR with descendant
-        let selector = Selector::parse("[class=Row] [clickable=true],[class=Column] [clickable=true]").unwrap();
+        let selector =
+            Selector::parse("[class=Row] [clickable=true],[class=Column] [clickable=true]")
+                .unwrap();
         assert!(selector.matches(button));
     }
 
@@ -1420,9 +1431,10 @@ mod tests {
         let button = wrapper.first_element_child().unwrap();
 
         // Container that has a button, containing the wrapper that has that button
-        let selector = Selector::parse("[class=Container]:has([text=Submit]) [class=Wrapper]").unwrap();
+        let selector =
+            Selector::parse("[class=Container]:has([text=Submit]) [class=Wrapper]").unwrap();
         assert!(selector.matches(wrapper));
-        
+
         // Wrapper is a descendant of Container, and Button is a descendant of that
         let selector2 = Selector::parse("[class=Container] [class=Wrapper] [text=Submit]").unwrap();
         assert!(selector2.matches(button));
@@ -1432,7 +1444,8 @@ mod tests {
     fn test_descendant_vs_child_precedence() {
         // Test that child combinator has higher precedence than descendant
         // A > B C should be parsed as (A > B) C, not A > (B C)
-        let xml = r##"<node class="A"><node class="B"><node class="C" text="Target" /></node></node>"##;
+        let xml =
+            r##"<node class="A"><node class="B"><node class="C" text="Target" /></node></node>"##;
         let doc = roxmltree::Document::parse(xml).unwrap();
         let a = doc.root_element();
         let b = a.first_element_child().unwrap();
@@ -1471,26 +1484,27 @@ mod tests {
         let textview = linear.first_element_child().unwrap();
 
         // Find text view inside scrollview
-        let selector = Selector::parse("[class=android.widget.ScrollView] [text=\"Item 1\"]").unwrap();
+        let selector =
+            Selector::parse("[class=android.widget.ScrollView] [text=\"Item 1\"]").unwrap();
         assert!(selector.matches(textview));
-        
+
         // Also should match the LinearLayout which is a direct child
-        let selector2 = Selector::parse("[class=android.widget.ScrollView] [class=android.widget.LinearLayout]").unwrap();
+        let selector2 = Selector::parse(
+            "[class=android.widget.ScrollView] [class=android.widget.LinearLayout]",
+        )
+        .unwrap();
         assert!(selector2.matches(linear));
     }
-
 
     #[test]
     fn test_nested_has_in_not() {
         // :not(:has([text=A])) - element that does NOT have a descendant with text=A
         let s = Selector::parse(":not(:has([text=Submit]))").unwrap();
         match s {
-            Selector::Not(inner) => {
-                match inner.as_ref() {
-                    Selector::Has(_) => {}
-                    _ => panic!("Expected Has selector inside Not"),
-                }
-            }
+            Selector::Not(inner) => match inner.as_ref() {
+                Selector::Has(_) => {}
+                _ => panic!("Expected Has selector inside Not"),
+            },
             _ => panic!("Expected Not selector"),
         }
 
@@ -1513,12 +1527,10 @@ mod tests {
         // :has(:not([clickable=false])) - element that has a descendant that is NOT clickable=false
         let s = Selector::parse(":has(:not([clickable=false]))").unwrap();
         match s {
-            Selector::Has(inner) => {
-                match inner.as_ref() {
-                    Selector::Not(_) => {}
-                    _ => panic!("Expected Not selector inside Has"),
-                }
-            }
+            Selector::Has(inner) => match inner.as_ref() {
+                Selector::Not(_) => {}
+                _ => panic!("Expected Not selector inside Has"),
+            },
             _ => panic!("Expected Has selector"),
         }
 
@@ -1679,7 +1691,7 @@ mod tests {
     fn test_startswith_operator_empty_value() {
         // CSS spec: ^= requires non-empty value
         assert!(Selector::parse("[text^=]").is_err());
-        
+
         // Valid: non-empty value
         let xml = r##"<node text="Anything" />"##;
         let doc = roxmltree::Document::parse(xml).unwrap();
@@ -1693,7 +1705,7 @@ mod tests {
     fn test_endswith_operator_empty_value() {
         // CSS spec: $= requires non-empty value
         assert!(Selector::parse("[text$=]").is_err());
-        
+
         // Valid: non-empty value
         let xml = r##"<node text="Anything" />"##;
         let doc = roxmltree::Document::parse(xml).unwrap();
@@ -1707,7 +1719,7 @@ mod tests {
     fn test_contains_operator_empty_value() {
         // CSS spec: *= requires non-empty value
         assert!(Selector::parse("[text*=]").is_err());
-        
+
         // Valid: non-empty value
         let xml = r##"<node text="Anything" />"##;
         let doc = roxmltree::Document::parse(xml).unwrap();
@@ -1748,10 +1760,14 @@ mod tests {
     #[test]
     fn test_child_combinator_with_has_as_parent() {
         // :has() > child - parent is a has selector
-        let xml = r##"<node class="Container"><node text="Submit" /><node class="Button" /></node>"##;
+        let xml =
+            r##"<node class="Container"><node text="Submit" /><node class="Button" /></node>"##;
         let doc = roxmltree::Document::parse(xml).unwrap();
         let container = doc.root_element();
-        let button = container.children().find(|n| n.attribute("class") == Some("Button")).unwrap();
+        let button = container
+            .children()
+            .find(|n| n.attribute("class") == Some("Button"))
+            .unwrap();
 
         let selector = Selector::parse(":has([text=Submit]) > [class=Button]").unwrap();
         assert!(selector.matches(button));
@@ -1764,8 +1780,14 @@ mod tests {
         let doc = roxmltree::Document::parse(xml).unwrap();
         let column = doc.root_element();
 
-        let button = column.children().find(|n| n.attribute("class") == Some("Button")).unwrap();
-        let spacer = column.children().find(|n| n.attribute("class") == Some("Spacer")).unwrap();
+        let button = column
+            .children()
+            .find(|n| n.attribute("class") == Some("Button"))
+            .unwrap();
+        let spacer = column
+            .children()
+            .find(|n| n.attribute("class") == Some("Spacer"))
+            .unwrap();
 
         let selector = Selector::parse("[class=Column] > :not([clickable=false])").unwrap();
         assert!(selector.matches(button));
@@ -1778,7 +1800,10 @@ mod tests {
         let xml = r##"<node class="Container"><node text="Submit" /><node class="Wrapper"><node class="Button" /></node></node>"##;
         let doc = roxmltree::Document::parse(xml).unwrap();
         let container = doc.root_element();
-        let button = container.descendants().find(|n| n.attribute("class") == Some("Button")).unwrap();
+        let button = container
+            .descendants()
+            .find(|n| n.attribute("class") == Some("Button"))
+            .unwrap();
 
         let selector = Selector::parse(":has([text=Submit]) [class=Button]").unwrap();
         assert!(selector.matches(button));
@@ -1790,11 +1815,15 @@ mod tests {
         let result = Selector::parse("[text=]");
         // This should either parse as empty value or error
         // Looking at the parser, it will parse as unquoted value which errors on empty
-        assert!(result.is_err() || result.unwrap() == Selector::And(vec![AttrClause {
-            attr: "text".to_string(),
-            op: AttrOp::Equals,
-            value: "".to_string(),
-        }]));
+        assert!(
+            result.is_err()
+                || result.unwrap()
+                    == Selector::And(vec![AttrClause {
+                        attr: "text".to_string(),
+                        op: AttrOp::Equals,
+                        value: "".to_string(),
+                    }])
+        );
     }
 
     #[test]
@@ -1836,7 +1865,11 @@ mod tests {
         // Deep nesting with descendant combinator
         let xml = r##"<node class="A"><node class="B"><node class="C"><node class="D"><node class="E" text="Target" /></node></node></node></node>"##;
         let doc = roxmltree::Document::parse(xml).unwrap();
-        let e = doc.root_element().descendants().find(|n| n.attribute("class") == Some("E")).unwrap();
+        let e = doc
+            .root_element()
+            .descendants()
+            .find(|n| n.attribute("class") == Some("E"))
+            .unwrap();
 
         let selector = Selector::parse("[class=A] [text=Target]").unwrap();
         assert!(selector.matches(e));

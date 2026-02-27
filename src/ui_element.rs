@@ -60,7 +60,7 @@ fn node_to_xml_string(node: roxmltree::Node) -> String {
     }
 
     let tag_name = node.tag_name().name();
-    
+
     // Build attributes string
     let mut attrs = String::new();
     for attr in node.attributes() {
@@ -77,7 +77,7 @@ fn node_to_xml_string(node: roxmltree::Node) -> String {
 
     // Check if node has children
     let has_children = node.children().any(|child| child.is_element());
-    
+
     if has_children {
         format!("<{}{}>", tag_name, attrs)
     } else {
@@ -92,7 +92,7 @@ fn node_to_xml_string_with_descendants(node: roxmltree::Node) -> String {
     }
 
     let tag_name = node.tag_name().name();
-    
+
     // Build attributes string
     let mut attrs = String::new();
     for attr in node.attributes() {
@@ -108,12 +108,13 @@ fn node_to_xml_string_with_descendants(node: roxmltree::Node) -> String {
     }
 
     // Collect child elements recursively
-    let child_elements: Vec<String> = node.children()
+    let child_elements: Vec<String> = node
+        .children()
         .filter(|child| child.is_element())
         .map(|child| node_to_xml_string_with_descendants(child))
         .filter(|s| !s.is_empty())
         .collect();
-    
+
     if child_elements.is_empty() {
         format!("<{}{} />", tag_name, attrs)
     } else {
