@@ -9,6 +9,17 @@ pub struct UiElement {
     pub raw_xml: String,
 }
 
+/// Check if an element is visible within the given screen dimensions
+/// Returns true if the element's bounds are at least partially within the screen
+pub fn is_element_visible(element: &UiElement, screen_width: i32, screen_height: i32) -> bool {
+    let (x1, y1, x2, y2) = element.bounds;
+    // Element is visible if it has any overlap with the screen bounds
+    // Check that the element is not completely outside the screen
+    let has_horizontal_overlap = x1 < screen_width && x2 > 0;
+    let has_vertical_overlap = y1 < screen_height && y2 > 0;
+    has_horizontal_overlap && has_vertical_overlap
+}
+
 pub fn get_ui_hierarchy(serial: Option<&str>) -> Result<String, String> {
     let output = get_adb_command(serial)
         .map_err(|e| format_adb_error(&e))?
@@ -194,5 +205,117 @@ mod tests {
     fn test_parse_bounds_invalid() {
         assert_eq!(parse_bounds("invalid"), None);
         assert_eq!(parse_bounds(""), None);
+    }
+
+    #[test]
+    fn test_is_element_visible_fully_inside() {
+        let element = UiElement {
+            bounds: (100, 100, 200, 200),
+            raw_xml: String::new(),
+        };
+        assert!(is_element_visible(&element, 500, 500));
+    }
+
+    #[test]
+    fn test_is_element_visible_partially_inside() {
+        // Partially visible on the right edge
+        let element = UiElement {
+            bounds: (450, 100, 550, 200),
+            raw_xml: String::new(),
+        };
+        assert!(is_element_visible(&element, 500, 500));
+
+        // Partially visible on the bottom edge
+        let element = UiElement {
+            bounds: (100, 450, 200, 550),
+            raw_xml: String::new(),
+        };
+        assert!(is_element_visible(&element, 500, 500));
+    }
+
+    #[test]
+    fn test_is_element_visible_completely_outside() {
+        // Completely to the right
+        let element = UiElement {
+            bounds: (600, 100, 700, 200),
+            raw_xml: String::new(),
+        };
+        assert!(!is_element_visible(&element, 500, 500));
+
+        // Completely to the bottom
+        let element = UiElement {
+            bounds: (100, 600, 200, 700),
+            raw_xml: String::new(),
+        };
+        assert!(!is_element_visible(&element, 500, 500));
+
+        // Completely to the left (negative coordinates)
+        let element = UiElement {
+            bounds: (-100, 100, -50, 200),
+            raw_xml: String::new(),
+        };
+        assert!(!is_element_visible(&element, 500, 500));
+
+        // Completely to the top (negative coordinates)
+        let element = UiElement {
+            bounds: (100, -100, 200, -50),
+            raw_xml: String::new(),
+        };
+        assert!(!is_element_visible(&element, 500, 500));
+    }
+
+    #[test]
+    fn test_is_element_visible_exactly_at_edge() {
+        // Right edge exactly at 0 (no overlap)
+        let element = UiElement {
+            bounds: (-100, 100, 0, 200),
+            raw_xml: String::new(),
+        };
+        assert!(!is_element_visible(&element, 500, 500));
+
+        // Bottom edge exactly at 0 (no overlap)
+        let element = UiElement {
+            bounds: (100, -100, 200, 0),
+            raw_xml: String::new(),
+        };
+        assert!(!is_element_visible(&element, 500, 500));
+
+        // Left edge exactly at screen width (no overlap)
+        let element = UiElement {
+            bounds: (500, 100, 600, 200),
+            raw_xml: String::new(),
+        };
+        assert!(!is_element_visible(&element, 500, 500));
+
+        // Top edge exactly at screen height (no overlap)
+        let element = UiElement {
+            bounds: (100, 500, 200, 600),
+            raw_xml: String::new(),
+        };
+        assert!(!is_element_visible(&element, 500, 500));
+    }
+
+    #[test]
+    fn test_is_element_visible_edge_cases() {
+        // Element at (0,0) with size 0
+        let element = UiElement {
+            bounds: (0, 0, 0, 0),
+            raw_xml: String::new(),
+        };
+        assert!(!is_element_visible(&element, 500, 500));
+
+        // Element exactly filling the screen
+        let element = UiElement {
+            bounds: (0, 0, 500, 500),
+            raw_xml: String::new(),
+        };
+        assert!(is_element_visible(&element, 500, 500));
+
+        // Element larger than screen
+        let element = UiElement {
+            bounds: (-100, -100, 600, 600),
+            raw_xml: String::new(),
+        };
+        assert!(is_element_visible(&element, 500, 500));
     }
 }

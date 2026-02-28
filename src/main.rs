@@ -8,7 +8,7 @@ use selector::Selector;
 use std::process::exit;
 use std::thread;
 use std::time::{Duration, Instant};
-use ui_element::{find_elements, find_elements_with_descendants, get_ui_hierarchy, UiElement};
+use ui_element::{find_elements, find_elements_with_descendants, get_ui_hierarchy, is_element_visible, UiElement};
 
 #[derive(clap::ValueEnum, Clone, Debug)]
 enum BochiCommand {
@@ -27,6 +27,12 @@ enum BochiCommand {
     /// Double tap an element
     #[value(name = "doubleTap")]
     DoubleTap,
+    /// Scroll up until the target element is visible
+    #[value(name = "scrollUp")]
+    ScrollUp,
+    /// Scroll down until the target element is visible
+    #[value(name = "scrollDown")]
+    ScrollDown,
 }
 
 #[derive(Parser)]
@@ -86,6 +92,20 @@ Supports CSS-like syntax:
         display_order = 20
     )]
     print_descendants: bool,
+
+    /// Target element selector for scrollUp/scrollDown commands (element to scroll to)
+    #[arg(
+        long,
+        help = "Target element selector for scrollUp/scrollDown commands",
+        long_help = r##"Target element selector for scrollUp/scrollDown commands.
+
+Specifies the element to scroll into view. Supports the same CSS-like syntax as -e/--selector.
+Example: --scroll-target '[text="Submit Button"]'
+"##,
+        help_heading = "Command-Specific Parameters",
+        display_order = 21
+    )]
+    scroll_target: Option<String>,
 }
 
 fn tap_element(serial: Option<&str>, element: &UiElement) -> Result<(), String> {
@@ -159,6 +179,166 @@ fn double_tap_element(serial: Option<&str>, element: &UiElement) -> Result<(), S
 
     // Second tap
     tap_element(serial, element)
+}
+
+/// Get the screen dimensions (width, height)
+fn get_screen_dimensions(serial: Option<&str>) -> Result<(i32, i32), String> {
+    let output = get_adb_command(serial)
+        .map_err(|e| format_adb_error(&e))?
+        .args(["shell", "wm", "size"])
+        .output()
+        .map_err(|e| format_adb_error(&e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Failed to get screen size: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let output_str = String::from_utf8_lossy(&output.stdout);
+    // Parse "Physical size: 1080x1920" or "Override size: 1080x1920"
+    for line in output_str.lines() {
+        if let Some(idx) = line.find("size: ") {
+            let size_part = &line[idx + 6..];
+            let parts: Vec<&str> = size_part.split('x').collect();
+            if parts.len() == 2 {
+                if let (Ok(width), Ok(height)) = (parts[0].trim().parse(), parts[1].trim().parse()) {
+                    return Ok((width, height));
+                }
+            }
+        }
+    }
+
+    Err(format!("Could not parse screen size from: {}", output_str))
+}
+
+/// Perform a swipe gesture
+fn perform_swipe(
+    serial: Option<&str>,
+    x1: i32,
+    y1: i32,
+    x2: i32,
+    y2: i32,
+    duration_ms: u64,
+) -> Result<(), String> {
+    let output = get_adb_command(serial)
+        .map_err(|e| format_adb_error(&e))?
+        .args([
+            "shell",
+            "input",
+            "swipe",
+            &x1.to_string(),
+            &y1.to_string(),
+            &x2.to_string(),
+            &y2.to_string(),
+            &duration_ms.to_string(),
+        ])
+        .output()
+        .map_err(|e| format_adb_error(&e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Swipe command failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(())
+}
+
+/// Scroll gradually until the target element is visible
+fn scroll_until_visible(
+    serial: Option<&str>,
+    scroll_selector: &Selector,
+    target_selector: &Selector,
+    timeout_secs: u64,
+    scroll_up: bool,
+) -> Result<(), String> {
+    let start = Instant::now();
+    let timeout = Duration::from_secs(timeout_secs);
+
+    // Get screen dimensions
+    let (screen_width, screen_height) = get_screen_dimensions(serial)?;
+
+    // Calculate swipe parameters
+    // Swipe from 70% to 30% of screen height (or reverse for scroll up)
+    let start_y = if scroll_up {
+        screen_height * 3 / 10 // Start from 30% from top
+    } else {
+        screen_height * 7 / 10 // Start from 70% from top
+    };
+    let end_y = if scroll_up {
+        screen_height * 7 / 10 // End at 70% from top (swiping down)
+    } else {
+        screen_height * 3 / 10 // End at 30% from top (swiping up)
+    };
+    let _center_x = screen_width / 2;
+
+    // Swipe duration in ms - moderate speed for smooth scrolling
+    let swipe_duration = 300;
+
+    loop {
+        if start.elapsed() > timeout {
+            return Err(format!(
+                "Timeout waiting for target element to become visible: {:?}",
+                target_selector
+            ));
+        }
+
+        // Get current UI hierarchy
+        let xml = get_ui_hierarchy(serial)?;
+
+        // First, check if target is already visible
+        let target_elements = find_elements(&xml, target_selector)?;
+        if let Some(target) = target_elements.first() {
+            if is_element_visible(target, screen_width, screen_height) {
+                return Ok(());
+            }
+        }
+
+        // Find scrollable element (the element we swipe on)
+        let scroll_elements = find_elements(&xml, scroll_selector)?;
+        if scroll_elements.is_empty() {
+            return Err(format!(
+                "Scroll element not found with selector: {:?}",
+                scroll_selector
+            ));
+        }
+
+        // Perform swipe on the first scrollable element's center area
+        let scroll_element = &scroll_elements[0];
+        let (ex1, ey1, ex2, ey2) = scroll_element.bounds;
+        let swipe_x = (ex1 + ex2) / 2;
+
+        // Calculate swipe coordinates relative to the scrollable element
+        let actual_start_y = if scroll_up {
+            ey1 + screen_height / 5 // Start lower within the element
+        } else {
+            ey2 - screen_height / 5 // Start higher within the element
+        };
+        let actual_end_y = if scroll_up {
+            (ey2 - screen_height / 5).min(start_y + (end_y - start_y).abs())
+        } else {
+            (ey1 + screen_height / 5).max(start_y - (end_y - start_y).abs())
+        };
+
+        // Clamp coordinates to be within screen bounds
+        let actual_start_y = actual_start_y.max(0).min(screen_height);
+        let actual_end_y = actual_end_y.max(0).min(screen_height);
+
+        perform_swipe(
+            serial,
+            swipe_x,
+            actual_start_y,
+            swipe_x,
+            actual_end_y,
+            swipe_duration,
+        )?;
+
+        // Small delay between swipes to let UI settle
+        thread::sleep(Duration::from_millis(500));
+    }
 }
 
 fn input_text_element(serial: Option<&str>, element: &UiElement, text: &str) -> Result<(), String> {
@@ -272,6 +452,32 @@ fn main() {
                 Err(e) => Err(e),
             }
         }
+        BochiCommand::ScrollUp => match cli.scroll_target {
+            Some(target_str) => match Selector::parse(&target_str) {
+                Ok(target_selector) => scroll_until_visible(
+                    cli.serial.as_deref(),
+                    &selector,
+                    &target_selector,
+                    cli.timeout,
+                    true, // scroll_up = true
+                ),
+                Err(e) => Err(format!("Failed to parse scroll target selector: {}", e)),
+            },
+            None => Err("--scroll-target parameter is required for scrollUp command".to_string()),
+        },
+        BochiCommand::ScrollDown => match cli.scroll_target {
+            Some(target_str) => match Selector::parse(&target_str) {
+                Ok(target_selector) => scroll_until_visible(
+                    cli.serial.as_deref(),
+                    &selector,
+                    &target_selector,
+                    cli.timeout,
+                    false, // scroll_up = false
+                ),
+                Err(e) => Err(format!("Failed to parse scroll target selector: {}", e)),
+            },
+            None => Err("--scroll-target parameter is required for scrollDown command".to_string()),
+        },
     };
 
     match result {

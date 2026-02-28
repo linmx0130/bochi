@@ -14,7 +14,7 @@ Bochi is a command line tool for AI agents to control Android devices via ADB. U
 
 - Uses `adb shell uiautomator dump` to obtain UI layout information
 - Supports CSS-like element selectors with attribute assertions, AND/OR logic, descendant matching, and negation
-- Commands: `waitFor`, `tap`, `inputText`, `longTap`, `doubleTap`
+- Commands: `waitFor`, `tap`, `inputText`, `longTap`, `doubleTap`, `scrollUp`, `scrollDown`
 - Configurable timeout
 
 ## Installation
@@ -51,6 +51,7 @@ Common Parameters:
 Command-Specific Parameters:
       --text <TEXT>        Text content for inputText command
       --print-descendants  Print the XML of matched elements including their descendants (for waitFor command)
+      --scroll-target <SELECTOR>  Target element selector for scrollUp/scrollDown commands
 ```
 
 ## Commands 
@@ -61,6 +62,8 @@ All commands are executed against the elements matched by the selector. If the e
 - `inputText`: Input text into an element
 - `longTap`: Long tap (1000ms) an element
 - `doubleTap`: Double tap an element
+- `scrollUp`: Scroll up until the target element is visible (requires `--scroll-target`)
+- `scrollDown`: Scroll down until the target element is visible (requires `--scroll-target`)
 
 ## Selector Syntax
 
@@ -309,6 +312,20 @@ bochi -s emulator-5554 -e '[resource-id=com.example:id/button]' -c tap
 ```bash
 bochi -e '[text=Loading]' -c waitFor -t 60
 ```
+
+### Scroll to an element
+
+For scrollable containers like `RecyclerView` or `ScrollView`, use `scrollUp` or `scrollDown` to find an element:
+
+```bash
+# Scroll down in a RecyclerView to find an item
+bochi -e '[class$=RecyclerView]' -c scrollDown --scroll-target '[text="Item 50"]'
+
+# Scroll up to find an element at the top
+bochi -e '[scrollable=true]' -c scrollUp --scroll-target '[text="Header"]'
+```
+
+The `-e` selector specifies the scrollable container, and `--scroll-target` specifies the element to scroll into view. The command will perform gradual swipes until the target element becomes visible or the timeout is reached.
 
 ### Selecting a Button Within a Specific Container
 When you need to interact with a button that appears multiple times on the screen (e.g., "Reset" buttons for different layout configurations), you can combine the :has() pseudo-class with the child combinator (>) to precisely target the button within a specific container.
