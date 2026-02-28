@@ -566,23 +566,53 @@ impl<'a> SelectorParser<'a> {
         }
     }
 
-    /// Parse a quoted string
+    /// Parse a quoted string, supporting escaped quotes (\" or \')
     fn parse_quoted_string(&mut self, quote: char) -> Result<String, String> {
         self.expect_char(quote)?;
-        let start = self.pos;
+        let mut result = String::new();
 
         while let Some(c) = self.peek() {
-            if c == quote {
-                let value = self.input[start..self.pos].to_string();
+            if c == '\\' {
+                // Handle escape sequences
+                self.advance(); // consume backslash
+                match self.peek() {
+                    Some('"') => {
+                        result.push('"');
+                        self.advance();
+                    }
+                    Some('\'') => {
+                        result.push('\'');
+                        self.advance();
+                    }
+                    Some('\\') => {
+                        result.push('\\');
+                        self.advance();
+                    }
+                    Some(other) => {
+                        // Unknown escape sequence, keep the backslash and character as-is
+                        result.push('\\');
+                        result.push(other);
+                        self.advance();
+                    }
+                    None => {
+                        return Err(format!(
+                            "Unterminated escape sequence at position {}",
+                            self.pos
+                        ));
+                    }
+                }
+            } else if c == quote {
                 self.advance(); // consume closing quote
-                return Ok(value);
+                return Ok(result);
+            } else {
+                result.push(c);
+                self.advance();
             }
-            self.advance();
         }
 
         Err(format!(
             "Unterminated string starting at position {}",
-            start - 1
+            self.pos
         ))
     }
 
@@ -1899,5 +1929,305 @@ mod tests {
 
         let selector = Selector::parse(":has([text=Anything])").unwrap();
         assert!(!selector.matches(container)); // No children at all
+    }
+
+    // Tests for escaped quotes in attribute values
+    #[test]
+    fn test_escaped_double_quotes_in_double_quoted_value() {
+        // Input: [text="Say \"Hello\""] should parse to value: Say "Hello"
+        let s = Selector::parse("[text=\"Say \\\"Hello\\\"\"]").unwrap();
+        match s {
+            Selector::And(clauses) => {
+                assert_eq!(clauses.len(), 1);
+                assert_eq!(clauses[0].attr, "text");
+                assert_eq!(clauses[0].value, "Say \"Hello\"");
+            }
+            _ => panic!("Expected And selector"),
+        }
+    }
+
+    #[test]
+    fn test_escaped_single_quotes_in_single_quoted_value() {
+        // Input: [text='It\'s done'] should parse to value: It's done
+        let s = Selector::parse("[text='It\\'s done']").unwrap();
+        match s {
+            Selector::And(clauses) => {
+                assert_eq!(clauses.len(), 1);
+                assert_eq!(clauses[0].attr, "text");
+                assert_eq!(clauses[0].value, "It's done");
+            }
+            _ => panic!("Expected And selector"),
+        }
+    }
+
+    #[test]
+    fn test_escaped_backslash_in_quoted_value() {
+        // Input: [text="C:\\Windows"] should parse to value: C:\Windows
+        let s = Selector::parse("[text=\"C:\\\\Windows\"]").unwrap();
+        match s {
+            Selector::And(clauses) => {
+                assert_eq!(clauses.len(), 1);
+                assert_eq!(clauses[0].value, "C:\\Windows");
+            }
+            _ => panic!("Expected And selector"),
+        }
+    }
+
+    #[test]
+    fn test_escaped_quote_at_end_of_value() {
+        // Input: [text="Value with quote at end\"] should parse to value: Value with quote at end"
+        let s = Selector::parse("[text=\"Value with quote at end\\\"\"]").unwrap();
+        match s {
+            Selector::And(clauses) => {
+                assert_eq!(clauses[0].value, "Value with quote at end\"");
+            }
+            _ => panic!("Expected And selector"),
+        }
+    }
+
+    #[test]
+    fn test_escaped_quote_at_start_of_value() {
+        // Input: [text="\"Quote at start"] should parse to value: "Quote at start
+        let s = Selector::parse("[text=\"\\\"Quote at start\"]").unwrap();
+        match s {
+            Selector::And(clauses) => {
+                assert_eq!(clauses[0].value, "\"Quote at start");
+            }
+            _ => panic!("Expected And selector"),
+        }
+    }
+
+    #[test]
+    fn test_multiple_escaped_quotes_in_value() {
+        // Input: [text="\"First\" and \"Second\""] should parse to value: "First" and "Second"
+        let s = Selector::parse("[text=\"\\\"First\\\" and \\\"Second\\\"\"]").unwrap();
+        match s {
+            Selector::And(clauses) => {
+                assert_eq!(clauses[0].value, "\"First\" and \"Second\"");
+            }
+            _ => panic!("Expected And selector"),
+        }
+    }
+
+    #[test]
+    fn test_matches_with_escaped_quotes() {
+        // XML attribute: text="Say \"Hello\""
+        let xml = r#"<node text="Say &quot;Hello&quot;" />"#;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        // Match using escaped quotes: [text="Say \"Hello\""]
+        let selector = Selector::parse("[text=\"Say \\\"Hello\\\"\"]").unwrap();
+        assert!(selector.matches(node));
+    }
+
+    #[test]
+    fn test_matches_with_escaped_quotes_single_quotes() {
+        // XML attribute: text="It's done"
+        let xml = "<node text=\"It's done\" />";
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        // Match using single quotes with escaped single quote: [text='It\'s done']
+        let selector = Selector::parse("[text='It\\'s done']").unwrap();
+        assert!(selector.matches(node));
+    }
+
+    // Tests for quotes within attribute values using opposite quote type
+    #[test]
+    fn test_single_quotes_inside_double_quoted_value() {
+        // Input: [text="It's a beautiful day"] should parse to value: It's a beautiful day
+        let s = Selector::parse("[text=\"It's a beautiful day\"]").unwrap();
+        match s {
+            Selector::And(clauses) => {
+                assert_eq!(clauses.len(), 1);
+                assert_eq!(clauses[0].value, "It's a beautiful day");
+            }
+            _ => panic!("Expected And selector"),
+        }
+    }
+
+    #[test]
+    fn test_double_quotes_inside_single_quoted_value() {
+        // Input: [text='Click "OK" button'] should parse to value: Click "OK" button
+        let s = Selector::parse("[text='Click \"OK\" button']").unwrap();
+        match s {
+            Selector::And(clauses) => {
+                assert_eq!(clauses.len(), 1);
+                assert_eq!(clauses[0].value, "Click \"OK\" button");
+            }
+            _ => panic!("Expected And selector"),
+        }
+    }
+
+    #[test]
+    fn test_matches_with_mixed_quotes_double_outer() {
+        // XML attribute: text="It's done"
+        let xml = "<node text=\"It's done\" />";
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        // Use double quotes to contain the single quote without escaping
+        let selector = Selector::parse("[text=\"It's done\"]").unwrap();
+        assert!(selector.matches(node));
+    }
+
+    #[test]
+    fn test_matches_with_mixed_quotes_single_outer() {
+        // XML attribute: text='Say "Hello" to everyone'
+        let xml = "<node text='Say &quot;Hello&quot; to everyone' />";
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        // Use single quotes to contain double quotes without escaping
+        let selector = Selector::parse("[text='Say \"Hello\" to everyone']").unwrap();
+        assert!(selector.matches(node));
+    }
+
+    #[test]
+    fn test_mixed_quotes_with_operators() {
+        // XML attribute: text="Contains 'special' text"
+        let xml = "<node text=\"Contains 'special' text\" class=\"Button\" />";
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        // Use *= with mixed quotes
+        let selector = Selector::parse("[text*='special']").unwrap();
+        assert!(selector.matches(node));
+    }
+
+    #[test]
+    fn test_mixed_quotes_with_startswith_operator() {
+        // XML attribute: text="'Start' with quote"
+        let xml = "<node text=\"'Start' with quote\" />";
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        let selector = Selector::parse("[text^=\"'Start'\"]").unwrap();
+        assert!(selector.matches(node));
+    }
+
+    #[test]
+    fn test_escaped_quotes_with_operators() {
+        // XML attribute: text='Say "Hello" to the world'
+        let xml = "<node text='Say &quot;Hello&quot; to the world' />";
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        // *= with escaped quotes: [text*="\"Hello\""]
+        let selector = Selector::parse("[text*=\"\\\"Hello\\\"\"]").unwrap();
+        assert!(selector.matches(node));
+    }
+
+    #[test]
+    fn test_escaped_quotes_with_startswith_operator() {
+        // XML attribute: text='Say "Hello"'
+        let xml = "<node text='Say &quot;Hello&quot;' />";
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        // ^= with escaped quotes: [text^="Say \""]
+        let selector = Selector::parse("[text^=\"Say \\\"\"]").unwrap();
+        assert!(selector.matches(node));
+    }
+
+    #[test]
+    fn test_unterminated_escape_sequence() {
+        // Unterminated escape at end of input: [text="test\]
+        let result = Selector::parse("[text=\"test\\\"]");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_unknown_escape_sequence() {
+        // Unknown escape sequences are preserved as-is: [text="test\n"]
+        let s = Selector::parse("[text=\"test\\n\"]").unwrap();
+        match s {
+            Selector::And(clauses) => {
+                // \n is not a recognized escape, so both chars are kept
+                assert_eq!(clauses[0].value, "test\\n");
+            }
+            _ => panic!("Expected And selector"),
+        }
+    }
+
+    #[test]
+    fn test_empty_value_with_escaped_quote() {
+        // Just an escaped quote: [text="\""]
+        let s = Selector::parse("[text=\"\\\"\"]").unwrap();
+        match s {
+            Selector::And(clauses) => {
+                assert_eq!(clauses[0].value, "\"");
+            }
+            _ => panic!("Expected And selector"),
+        }
+    }
+
+    #[test]
+    fn test_escaped_quotes_in_complex_selector() {
+        // Escaped quotes with :has()
+        let xml = "<node class=\"Container\"><node text=\"It's working!\" /></node>";
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let container = doc.root_element();
+
+        let selector = Selector::parse("[class=Container]:has([text=\"It's working!\"])").unwrap();
+        assert!(selector.matches(container));
+    }
+
+    #[test]
+    fn test_escaped_quotes_with_or_selector() {
+        // Escaped quotes in OR expression
+        let xml = "<node text='Say &quot;Hello&quot;' />";
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        let selector = Selector::parse("[text=\"Say \\\"Hello\\\"\"],[text=\"Other\"]").unwrap();
+        assert!(selector.matches(node));
+    }
+
+    #[test]
+    fn test_consecutive_escaped_quotes() {
+        // Multiple consecutive escaped quotes: [text="\"\"\""]
+        let s = Selector::parse("[text=\"\\\"\\\"\\\"\"]").unwrap();
+        match s {
+            Selector::And(clauses) => {
+                assert_eq!(clauses[0].value, "\"\"\"");
+            }
+            _ => panic!("Expected And selector"),
+        }
+    }
+
+    #[test]
+    fn test_consecutive_backslashes() {
+        // Multiple consecutive backslashes: [text="C:\\\\Windows\\\\System32"]
+        let s = Selector::parse("[text=\"C:\\\\\\\\Windows\\\\\\\\System32\"]").unwrap();
+        match s {
+            Selector::And(clauses) => {
+                assert_eq!(clauses[0].value, "C:\\\\Windows\\\\System32");
+            }
+            _ => panic!("Expected And selector"),
+        }
+    }
+
+    #[test]
+    fn test_escaped_quote_in_single_quoted_with_operators() {
+        // Test escaped single quote with operators
+        let xml = "<node text=\"It's working\" />";
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        let selector = Selector::parse("[text*='It\\'s']").unwrap();
+        assert!(selector.matches(node));
+    }
+
+    #[test]
+    fn test_escaped_double_quote_in_double_quoted_with_operators() {
+        // Test escaped double quote with operators
+        let xml = "<node text='Say &quot;Hello&quot;' />";
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        let selector = Selector::parse("[text*=\"\\\"Hello\\\"\"]").unwrap();
+        assert!(selector.matches(node));
     }
 }

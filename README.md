@@ -209,6 +209,25 @@ Values can be quoted or unquoted:
 - `[text="Submit Button"]` - double quotes (required for values with spaces)
 - `[text='Submit']` - single quotes
 
+#### Using Opposite Quote Types
+
+You can include one type of quote inside the other without escaping:
+- `[text="It's done"]` - single quote inside double quotes
+- `[text='Say "Hello"']` - double quotes inside single quotes
+
+#### Escape Sequences
+
+To include the same type of quote within quoted values, use backslash escaping:
+- `[text="Say \"Hello\""]` - escaped double quotes
+- `[text='It\'s done']` - escaped single quote
+- `[text="C:\\Windows"]` - escaped backslash
+
+Supported escape sequences:
+- `\"` - double quote
+- `\'` - single quote  
+- `\\` - backslash
+- Unknown sequences (e.g., `\n`) are preserved as-is
+
 ## Examples
 
 ### Wait for an element to appear
