@@ -314,7 +314,7 @@ Connect to a remote ADB server instead of the local one:
 
 ```bash
 # Connect to remote ADB server at 127.0.0.1:5554
-bochi --remote 127.0.0.1:5037' -e '[text=Submit]' -c tap
+bochi --remote 127.0.0.1:5037 -e '[text=Submit]' -c tap
 
 # For IPv6 addresses, use brackets
 bochi --remote '[::1]:5037' -e '[text=Submit]' -c tap
