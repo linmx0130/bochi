@@ -43,6 +43,20 @@ struct Cli {
     #[arg(short, long, help_heading = "Common Parameters", display_order = 1)]
     serial: Option<String>,
 
+    /// Remote ADB server address in host:port format (e.g., 127.0.0.1:5037)
+    #[arg(
+        long,
+        help = "Remote ADB server address (host:port)",
+        long_help = r#"Remote ADB server address in host:port format.
+
+Connects to a remote ADB server instead of the local one.
+Example: --remote 127.0.0.1:5037
+Both host and port must be specified."#,
+        help_heading = "Common Parameters",
+        display_order = 5
+    )]
+    remote: Option<String>,
+
     /// Element selector
     #[arg(
         short = 'e',
@@ -123,6 +137,7 @@ fn main() {
     let result = match cli.command {
         BochiCommand::WaitFor => wait_for_elements(
             cli.serial.as_deref(),
+            cli.remote.as_deref(),
             &selector,
             cli.timeout,
             cli.print_descendants,
@@ -133,27 +148,27 @@ fn main() {
             }
         }),
         BochiCommand::Tap => {
-            match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
-                Ok(element) => tap_element(cli.serial.as_deref(), &element),
+            match wait_for_element(cli.serial.as_deref(), cli.remote.as_deref(), &selector, cli.timeout) {
+                Ok(element) => tap_element(cli.serial.as_deref(), cli.remote.as_deref(), &element),
                 Err(e) => Err(e),
             }
         }
         BochiCommand::InputText => match cli.text {
-            Some(text) => match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
-                Ok(element) => input_text_element(cli.serial.as_deref(), &element, &text),
+            Some(text) => match wait_for_element(cli.serial.as_deref(), cli.remote.as_deref(), &selector, cli.timeout) {
+                Ok(element) => input_text_element(cli.serial.as_deref(), cli.remote.as_deref(), &element, &text),
                 Err(e) => Err(e),
             },
             None => Err("--text parameter is required for inputText command".to_string()),
         },
         BochiCommand::LongTap => {
-            match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
-                Ok(element) => long_tap_element(cli.serial.as_deref(), &element, 1000),
+            match wait_for_element(cli.serial.as_deref(), cli.remote.as_deref(), &selector, cli.timeout) {
+                Ok(element) => long_tap_element(cli.serial.as_deref(), cli.remote.as_deref(), &element, 1000),
                 Err(e) => Err(e),
             }
         }
         BochiCommand::DoubleTap => {
-            match wait_for_element(cli.serial.as_deref(), &selector, cli.timeout) {
-                Ok(element) => double_tap_element(cli.serial.as_deref(), &element),
+            match wait_for_element(cli.serial.as_deref(), cli.remote.as_deref(), &selector, cli.timeout) {
+                Ok(element) => double_tap_element(cli.serial.as_deref(), cli.remote.as_deref(), &element),
                 Err(e) => Err(e),
             }
         }
@@ -161,6 +176,7 @@ fn main() {
             Some(target_str) => match Selector::parse(&target_str) {
                 Ok(target_selector) => scroll_until_visible(
                     cli.serial.as_deref(),
+                    cli.remote.as_deref(),
                     &selector,
                     &target_selector,
                     cli.timeout,
@@ -174,6 +190,7 @@ fn main() {
             Some(target_str) => match Selector::parse(&target_str) {
                 Ok(target_selector) => scroll_until_visible(
                     cli.serial.as_deref(),
+                    cli.remote.as_deref(),
                     &selector,
                     &target_selector,
                     cli.timeout,
