@@ -14,10 +14,10 @@ pub fn get_element_center(element: &UiElement) -> (i32, i32) {
     (center_x, center_y)
 }
 
-pub fn tap_element(serial: Option<&str>, element: &UiElement) -> Result<(), String> {
+pub fn tap_element(serial: Option<&str>, remote: Option<&str>, element: &UiElement) -> Result<(), String> {
     let (center_x, center_y) = get_element_center(element);
 
-    let output = get_adb_command(serial)
+    let output = get_adb_command(serial, remote)
         .map_err(|e| format_adb_error(&e))?
         .args([
             "shell",
@@ -41,13 +41,14 @@ pub fn tap_element(serial: Option<&str>, element: &UiElement) -> Result<(), Stri
 
 pub fn long_tap_element(
     serial: Option<&str>,
+    remote: Option<&str>,
     element: &UiElement,
     duration_ms: u64,
 ) -> Result<(), String> {
     let (center_x, center_y) = get_element_center(element);
 
     // Use swipe with same start and end position to simulate a long press
-    let output = get_adb_command(serial)
+    let output = get_adb_command(serial, remote)
         .map_err(|e| format_adb_error(&e))?
         .args([
             "shell",
@@ -72,20 +73,20 @@ pub fn long_tap_element(
     Ok(())
 }
 
-pub fn double_tap_element(serial: Option<&str>, element: &UiElement) -> Result<(), String> {
+pub fn double_tap_element(serial: Option<&str>, remote: Option<&str>, element: &UiElement) -> Result<(), String> {
     // First tap
-    tap_element(serial, element)?;
+    tap_element(serial, remote, element)?;
 
     // Small delay between taps (typical double tap timing)
     thread::sleep(Duration::from_millis(100));
 
     // Second tap
-    tap_element(serial, element)
+    tap_element(serial, remote, element)
 }
 
 /// Get the screen dimensions (width, height)
-pub fn get_screen_dimensions(serial: Option<&str>) -> Result<(i32, i32), String> {
-    let output = get_adb_command(serial)
+pub fn get_screen_dimensions(serial: Option<&str>, remote: Option<&str>) -> Result<(i32, i32), String> {
+    let output = get_adb_command(serial, remote)
         .map_err(|e| format_adb_error(&e))?
         .args(["shell", "wm", "size"])
         .output()
@@ -122,13 +123,14 @@ pub fn parse_screen_dimensions(output: &str) -> Result<(i32, i32), String> {
 /// Perform a swipe gesture
 pub fn perform_swipe(
     serial: Option<&str>,
+    remote: Option<&str>,
     x1: i32,
     y1: i32,
     x2: i32,
     y2: i32,
     duration_ms: u64,
 ) -> Result<(), String> {
-    let output = get_adb_command(serial)
+    let output = get_adb_command(serial, remote)
         .map_err(|e| format_adb_error(&e))?
         .args([
             "shell",
@@ -185,6 +187,7 @@ pub fn calculate_scroll_coordinates(
 /// Scroll gradually until the target element is visible
 pub fn scroll_until_visible(
     serial: Option<&str>,
+    remote: Option<&str>,
     scroll_selector: &Selector,
     target_selector: &Selector,
     timeout_secs: u64,
@@ -194,7 +197,7 @@ pub fn scroll_until_visible(
     let timeout = Duration::from_secs(timeout_secs);
 
     // Get screen dimensions
-    let (screen_width, screen_height) = get_screen_dimensions(serial)?;
+    let (screen_width, screen_height) = get_screen_dimensions(serial, remote)?;
 
     // Swipe duration in ms - moderate speed for smooth scrolling
     let swipe_duration = 300;
@@ -208,7 +211,7 @@ pub fn scroll_until_visible(
         }
 
         // Get current UI hierarchy
-        let xml = get_ui_hierarchy(serial)?;
+        let xml = get_ui_hierarchy(serial, remote)?;
 
         // First, check if target is already visible
         let target_elements = find_elements(&xml, target_selector)?;
@@ -231,22 +234,22 @@ pub fn scroll_until_visible(
         let scroll_element = &scroll_elements[0];
         let (x1, y1, x2, y2) = calculate_scroll_coordinates(scroll_element, screen_height, scroll_up);
 
-        perform_swipe(serial, x1, y1, x2, y2, swipe_duration)?;
+        perform_swipe(serial, remote, x1, y1, x2, y2, swipe_duration)?;
 
         // Small delay between swipes to let UI settle
         thread::sleep(Duration::from_millis(500));
     }
 }
 
-pub fn input_text_element(serial: Option<&str>, element: &UiElement, text: &str) -> Result<(), String> {
+pub fn input_text_element(serial: Option<&str>, remote: Option<&str>, element: &UiElement, text: &str) -> Result<(), String> {
     // First tap to focus on the element
-    tap_element(serial, element)?;
+    tap_element(serial, remote, element)?;
 
     // Small delay to ensure the element is focused
     thread::sleep(Duration::from_millis(100));
 
     // Then type the text
-    let output = get_adb_command(serial)
+    let output = get_adb_command(serial, remote)
         .map_err(|e| format_adb_error(&e))?
         .args(["shell", "input", "text", text])
         .output()
@@ -264,15 +267,17 @@ pub fn input_text_element(serial: Option<&str>, element: &UiElement, text: &str)
 
 pub fn wait_for_element(
     serial: Option<&str>,
+    remote: Option<&str>,
     selector: &Selector,
     timeout_secs: u64,
 ) -> Result<UiElement, String> {
-    wait_for_elements(serial, selector, timeout_secs, false)
+    wait_for_elements(serial, remote, selector, timeout_secs, false)
         .map(|elements| elements.into_iter().next().unwrap())
 }
 
 pub fn wait_for_elements(
     serial: Option<&str>,
+    remote: Option<&str>,
     selector: &Selector,
     timeout_secs: u64,
     with_descendants: bool,
@@ -288,7 +293,7 @@ pub fn wait_for_elements(
             ));
         }
 
-        let xml = get_ui_hierarchy(serial)?;
+        let xml = get_ui_hierarchy(serial, remote)?;
         let elements = if with_descendants {
             find_elements_with_descendants(&xml, selector)?
         } else {

@@ -20,8 +20,8 @@ pub fn is_element_visible(element: &UiElement, screen_width: i32, screen_height:
     has_horizontal_overlap && has_vertical_overlap
 }
 
-pub fn get_ui_hierarchy(serial: Option<&str>) -> Result<String, String> {
-    let output = get_adb_command(serial)
+pub fn get_ui_hierarchy(serial: Option<&str>, remote: Option<&str>) -> Result<String, String> {
+    let output = get_adb_command(serial, remote)
         .map_err(|e| format_adb_error(&e))?
         .args(["shell", "uiautomator", "dump", "/sdcard/window_dump.xml"])
         .output()
@@ -34,7 +34,7 @@ pub fn get_ui_hierarchy(serial: Option<&str>) -> Result<String, String> {
         ));
     }
 
-    let output = get_adb_command(serial)
+    let output = get_adb_command(serial, remote)
         .map_err(|e| format_adb_error(&e))?
         .args(["shell", "cat", "/sdcard/window_dump.xml"])
         .output()

@@ -39,6 +39,7 @@ Common Parameters:
   -e, --selector <SELECTOR>  Element selector. Supports CSS-like syntax
   -c, --command <COMMAND>
   -t, --timeout <TIMEOUT>    [default: 30]
+      --remote <REMOTE>      Remote ADB server address (host:port)
 
 Command-Specific Parameters:
       --text <TEXT>        Text content for inputText command
@@ -82,6 +83,21 @@ bochi -e '[resource-id=com.example:id/username]' -c inputText --text "myusername
 
 ```bash
 bochi -s emulator-5554 -e '[resource-id=com.example:id/button]' -c tap
+```
+
+### Connect to remote ADB server
+
+```bash
+bochi --remote 127.0.0.1:5037 -e '[text=Submit]' -c tap
+```
+
+Both host and port must be specified. This translates to `adb -H host -P port` commands internally. 
+The remote ADB server must be started with `-a` to accept external connections.
+
+For IPv6 addresses, use brackets:
+
+```bash
+bochi --remote '[::1]:5037' -e '[text=Submit]' -c tap
 ```
 
 ### Set custom timeout
