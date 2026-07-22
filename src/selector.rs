@@ -660,13 +660,13 @@ impl<'a> SelectorParser<'a> {
 
     /// Peek at the current character without consuming
     fn peek(&self) -> Option<char> {
-        self.input.chars().nth(self.pos)
+        self.input[self.pos..].chars().next()
     }
 
     /// Advance to the next character
     fn advance(&mut self) {
-        if self.pos < self.input.len() {
-            self.pos += 1;
+        if let Some(c) = self.peek() {
+            self.pos += c.len_utf8();
         }
     }
 
@@ -1035,6 +1035,65 @@ mod tests {
 
         let selector3 = Selector::parse("[text*=Cancel]").unwrap();
         assert!(!selector3.matches(node));
+    }
+
+    // Tests for multi-byte (UTF-8) characters in selectors
+    #[test]
+    fn test_parse_contains_multibyte() {
+        let s = Selector::parse("[text*=开始]").unwrap();
+        match s {
+            Selector::And(clauses) => {
+                assert_eq!(clauses.len(), 1);
+                assert_eq!(clauses[0].attr, "text");
+                assert_eq!(clauses[0].op, AttrOp::Contains);
+                assert_eq!(clauses[0].value, "开始");
+            }
+            _ => panic!("Expected And selector"),
+        }
+    }
+
+    #[test]
+    fn test_matches_multibyte_operators() {
+        let xml = r##"<node text="开始新的旅程" class="Button" />"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.root_element();
+
+        assert!(Selector::parse("[text=开始新的旅程]").unwrap().matches(node));
+        assert!(Selector::parse("[text^=开始]").unwrap().matches(node));
+        assert!(Selector::parse("[text$=旅程]").unwrap().matches(node));
+        assert!(Selector::parse("[text*=新的]").unwrap().matches(node));
+        assert!(!Selector::parse("[text=开始]").unwrap().matches(node));
+        assert!(!Selector::parse("[text*=结束]").unwrap().matches(node));
+    }
+
+    #[test]
+    fn test_parse_quoted_multibyte() {
+        let s = Selector::parse("[text=\"确定 提交\"]").unwrap();
+        match s {
+            Selector::And(clauses) => {
+                assert_eq!(clauses.len(), 1);
+                assert_eq!(clauses[0].value, "确定 提交");
+            }
+            _ => panic!("Expected And selector"),
+        }
+    }
+
+    #[test]
+    fn test_matches_multibyte_compound() {
+        let xml = r##"<node class="Container"><node text="确定" /></node>"##;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let container = doc.root_element();
+        let child = container.first_element_child().unwrap();
+
+        // :has() with multi-byte inner selector
+        assert!(Selector::parse(":has([text=确定])").unwrap().matches(container));
+        assert!(!Selector::parse(":has([text=取消])").unwrap().matches(container));
+
+        // OR with multi-byte values
+        assert!(Selector::parse("[text=取消],[text=确定]").unwrap().matches(child));
+
+        // Descendant combinator with multi-byte values
+        assert!(Selector::parse("[class=Container] [text=确定]").unwrap().matches(child));
     }
 
     #[test]
